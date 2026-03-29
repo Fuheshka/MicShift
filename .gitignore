@@ -52,3 +52,21 @@ CodeCoverage/
 *.VisualState.xml
 TestResult.xml
 nunit-*.xml
+
+# VS Code
+.vscode/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Publish output
+publish/
+out/
+
+# Environment / secrets
+*.env
+.env
+appsettings.Development.json
+appsettings.Local.json
