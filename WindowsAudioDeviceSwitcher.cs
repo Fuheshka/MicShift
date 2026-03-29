@@ -53,12 +53,15 @@ public sealed class WindowsAudioDeviceSwitcher : IAudioDeviceSwitcher, IDisposab
 
         try
         {
-            return await device.SetAsDefaultCommunicationsAsync();
+            // Set both roles: multimedia default AND communications default.
+            bool defaultOk = await device.SetAsDefaultAsync();
+            bool commsOk   = await device.SetAsDefaultCommunicationsAsync();
+            return defaultOk && commsOk;
         }
         catch (Exception ex)
         {
             throw new InvalidOperationException(
-                $"The OS rejected the request to set \"{device.FullName}\" as the default communications device.",
+                $"The OS rejected the request to set \"{device.FullName}\" as the default device.",
                 ex);
         }
     }
