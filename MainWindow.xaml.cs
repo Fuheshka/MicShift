@@ -16,6 +16,7 @@ public partial class MainWindow : Window
     private readonly AutoSwitchService _autoSwitch;
     private readonly DispatcherTimer _timer;
     private bool _isInitializing = true;
+    private bool _isExplicitExit = false;
 
     public MainWindow(WindowsAudioDeviceSwitcher switcher, AutoSwitchService autoSwitch)
     {
@@ -59,6 +60,8 @@ public partial class MainWindow : Window
                 HeadsetMicComboBox.SelectedItem = settings.HeadsetMicrophoneName;
             }
 
+            NotificationsToggle.IsChecked = settings.NotificationsEnabled;
+
             // Check if microphones are configured
             bool isConfigured = !string.IsNullOrEmpty(settings.DeskMicrophoneName) && !string.IsNullOrEmpty(settings.HeadsetMicrophoneName);
             if (!isConfigured)
@@ -76,6 +79,12 @@ public partial class MainWindow : Window
             }
 
             _isInitializing = false;
+
+            // Force update microphones on load to initialize monitors
+            if (isConfigured)
+            {
+                _autoSwitch.UpdateMicrophones(settings.DeskMicrophoneName, settings.HeadsetMicrophoneName);
+            }
 
             UpdateStatusUI();
             _timer.Start();
@@ -197,6 +206,17 @@ public partial class MainWindow : Window
         UpdateStatusUI();
     }
 
+    private void OnNotificationsToggled(object sender, RoutedEventArgs e)
+    {
+        if (_isInitializing) return;
+
+        bool isChecked = NotificationsToggle.IsChecked ?? false;
+
+        var settings = SettingsManager.Load();
+        settings.NotificationsEnabled = isChecked;
+        SettingsManager.Save(settings);
+    }
+
     private void UpdateStatusUI()
     {
         if (_autoSwitch.IsRunning)
@@ -217,14 +237,26 @@ public partial class MainWindow : Window
         NotificationManager.Show("MicShift Running", "MicShift is running in the background. Double-click the tray icon to open.");
     }
 
+    public void PrepareForExit()
+    {
+        _isExplicitExit = true;
+    }
+
     private void OnExitClick(object sender, RoutedEventArgs e)
     {
         Log.Information("Exit button clicked in UI. Shutting down.");
+        PrepareForExit();
         System.Windows.Application.Current.Shutdown();
     }
 
     protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
     {
+        if (_isExplicitExit)
+        {
+            _timer.Stop();
+            return;
+        }
+
         // Intercept close button and hide instead
         e.Cancel = true;
         this.Hide();

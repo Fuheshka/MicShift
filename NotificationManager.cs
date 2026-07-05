@@ -105,7 +105,15 @@ public static class NotificationManager
             var exitItem = new ToolStripMenuItem("Exit", null, (s, e) =>
             {
                 Log.Information("Exit clicked from System Tray menu. Shutting down.");
-                Application.Current.Shutdown();
+                Application.Current.Dispatcher.Invoke(() =>
+                {
+                    var win = Application.Current.MainWindow as MainWindow;
+                    if (win != null)
+                    {
+                        win.PrepareForExit();
+                    }
+                    Application.Current.Shutdown();
+                });
             });
 
             _contextMenu.Items.Add(openItem);
@@ -143,7 +151,7 @@ public static class NotificationManager
 
     public static void Show(string title, string message)
     {
-        if (_notifyIcon != null)
+        if (_notifyIcon != null && SettingsManager.Load().NotificationsEnabled)
         {
             _notifyIcon.ShowBalloonTip(3000, title, message, ToolTipIcon.Info);
         }

@@ -9,6 +9,7 @@ public class AppSettings
     public string DeskMicrophoneName { get; set; } = string.Empty;
     public string HeadsetMicrophoneName { get; set; } = string.Empty;
     public bool AutoSwitchEnabled { get; set; } = true;
+    public bool NotificationsEnabled { get; set; } = true;
 }
 
 public static class SettingsManager
