@@ -2,6 +2,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
 using Serilog;
+using AudioSwitcher.AudioApi.CoreAudio;
 
 namespace MicShift;
 
@@ -33,6 +34,11 @@ public partial class App : System.Windows.Application
             .CreateLogger();
 
         Log.Information("MicShift WPF App started.");
+
+        foreach (var prop in typeof(CoreAudioDevice).GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance))
+        {
+            Log.Debug("CoreAudioDevice Prop: {Name} ({Type})", prop.Name, prop.PropertyType.FullName);
+        }
 
         var switcher = new WindowsAudioDeviceSwitcher();
         var appSettings = SettingsManager.Load();

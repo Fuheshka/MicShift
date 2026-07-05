@@ -1,81 +1,148 @@
-using NAudio.CoreAudioApi;
+using NAudio.Wave;
 using Serilog;
 
 namespace MicShift;
 
 /// <summary>
-/// Streams peak volume levels directly from Windows Core Audio WASAPI (AudioMeterInformation)
-/// without opening a recording stream. Bulletproof and uses 0% CPU.
+/// Streams audio from a single capture device using WinMM WaveInEvent
+/// and exposes a rolling peak level (0.0 – 1.0).
+/// Uses 100% safe WinMM APIs to avoid COM cast exceptions with AudioSwitcher.
 /// </summary>
 public sealed class AudioMonitorService : IDisposable
 {
-    private readonly MMDevice? _device;
-    private readonly MMDeviceEnumerator _enumerator;
+    private WaveInEvent? _waveIn;
+    private volatile float _currentPeakLevel;
+    private volatile Exception? _lastException;
     private bool _disposed;
 
     public string DeviceName { get; }
-    public Exception? LastException { get; }
+    public Exception? LastException => _lastException;
+    public float CurrentPeakLevel => _currentPeakLevel;
 
     public AudioMonitorService(string friendlyName)
     {
         DeviceName = friendlyName;
-        _enumerator = new MMDeviceEnumerator();
-        
+
         try
         {
-            var devices = _enumerator.EnumerateAudioEndPoints(DataFlow.Capture, DeviceState.Active);
-            // Search for exact match
-            _device = devices.FirstOrDefault(d => d.FriendlyName.Equals(friendlyName, StringComparison.OrdinalIgnoreCase));
-            
-            // Fallback: partial match if name got truncated
-            if (_device == null)
+            int deviceIndex = FindWaveInDeviceIndex(friendlyName);
+            if (deviceIndex < 0)
             {
-                _device = devices.FirstOrDefault(d => d.FriendlyName.Contains(friendlyName, StringComparison.OrdinalIgnoreCase)
-                    || friendlyName.Contains(d.FriendlyName, StringComparison.OrdinalIgnoreCase));
+                Log.Warning("WaveIn Monitor: Could not find matching WaveIn device for {DeviceName}", friendlyName);
+                return;
             }
 
-            if (_device == null)
+            _waveIn = new WaveInEvent
             {
-                Log.Warning("WASAPI Monitor: Could not find active device matching {DeviceName}", friendlyName);
-            }
-            else
+                DeviceNumber = deviceIndex,
+                WaveFormat   = new WaveFormat(rate: 44100, bits: 16, channels: 1),
+                BufferMilliseconds = 50
+            };
+
+            _waveIn.DataAvailable += OnDataAvailable;
+            _waveIn.RecordingStopped += (sender, args) =>
             {
-                Log.Information("WASAPI Monitor started for device: {FriendlyName}", _device.FriendlyName);
-            }
+                if (args.Exception != null)
+                {
+                    _lastException = args.Exception;
+                    Log.Error(args.Exception, "WaveIn recording stopped unexpectedly for {DeviceName}", friendlyName);
+                }
+            };
+            
+            _waveIn.StartRecording();
+            Log.Information("WaveIn Monitor started for device: {DeviceName} (Index: {Index})", friendlyName, deviceIndex);
         }
         catch (Exception ex)
         {
-            LastException = ex;
-            Log.Error(ex, "Failed to initialize WASAPI volume monitor for {DeviceName}", friendlyName);
+            _lastException = ex;
+            Log.Error(ex, "Failed to start WaveIn audio monitor for {DeviceName}", friendlyName);
         }
     }
 
-    /// <summary>
-    /// Current peak volume (0.0 to 1.0)
-    /// </summary>
-    public float CurrentPeakLevel
+    private static int FindWaveInDeviceIndex(string friendlyName)
     {
-        get
+        int count = WaveIn.DeviceCount;
+        if (count == 0) return -1;
+
+        // 1. Exact or partial name match
+        for (int i = 0; i < count; i++)
         {
-            if (_disposed || _device == null) return 0f;
             try
             {
-                // MasterPeakValue is updated by Windows Audio service in real-time
-                return _device.AudioMeterInformation.MasterPeakValue;
+                WaveInCapabilities cap = WaveIn.GetCapabilities(i);
+                string capName = cap.ProductName;
+
+                if (friendlyName.Contains(capName, StringComparison.OrdinalIgnoreCase)
+                    || capName.Contains(friendlyName[..Math.Min(friendlyName.Length, 15)], StringComparison.OrdinalIgnoreCase))
+                {
+                    return i;
+                }
             }
             catch (Exception ex)
             {
-                Log.Verbose(ex, "Failed to read peak value from device {DeviceName}", DeviceName);
-                return 0f;
+                Log.Verbose(ex, "Failed to get WaveIn capabilities for index {Index}", i);
             }
         }
+
+        // 2. Keyword match (e.g. matching "PD200X", "G435")
+        var words = friendlyName.Split(new[] { ' ', '(', ')', '-', '_' }, StringSplitOptions.RemoveEmptyEntries)
+                                .Where(w => w.Length >= 3 && w.Any(char.IsLetterOrDigit));
+        foreach (var word in words)
+        {
+            for (int i = 0; i < count; i++)
+            {
+                try
+                {
+                    if (WaveIn.GetCapabilities(i).ProductName.Contains(word, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return i;
+                    }
+                }
+                catch
+                {
+                    // Ignore capabilities errors
+                }
+            }
+        }
+
+        // 3. Fallback to 0 (default system device index) if nothing matches
+        Log.Warning("WaveIn Monitor: No match found for {DeviceName}. Falling back to default device index 0.", friendlyName);
+        return 0;
+    }
+
+    private void OnDataAvailable(object? sender, WaveInEventArgs e)
+    {
+        float peak = 0f;
+
+        for (int i = 0; i < e.BytesRecorded; i += 2)
+        {
+            short sample = BitConverter.ToInt16(e.Buffer, i);
+            float normalized = Math.Abs(sample / 32768f);
+            if (normalized > peak)
+                peak = normalized;
+        }
+
+        _currentPeakLevel = peak;
     }
 
     public void Dispose()
     {
         if (_disposed) return;
-        _device?.Dispose();
-        _enumerator.Dispose();
+        
+        try
+        {
+            if (_waveIn != null)
+            {
+                _waveIn.StopRecording();
+                _waveIn.DataAvailable -= OnDataAvailable;
+                _waveIn.Dispose();
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Debug(ex, "Exception disposing WaveIn for {DeviceName}", DeviceName);
+        }
+
         _disposed = true;
     }
 }

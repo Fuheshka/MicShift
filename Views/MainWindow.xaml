@@ -324,12 +324,18 @@
                                     </Grid.ColumnDefinitions>
                                     
                                     <StackPanel Grid.Column="0">
-                                        <TextBlock Text="Desk Microphone" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource MutedText}" Margin="0,0,0,5"/>
+                                        <StackPanel Orientation="Horizontal" Margin="0,0,0,5">
+                                            <TextBlock Text="Desk Microphone" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource MutedText}"/>
+                                            <TextBlock x:Name="DeskActiveLabel" Text="" FontSize="11" FontWeight="Bold" Margin="8,0,0,0"/>
+                                        </StackPanel>
                                         <ComboBox x:Name="DeskMicComboBox" Height="30" SelectionChanged="OnMicSelectionChanged"/>
                                     </StackPanel>
 
                                     <StackPanel Grid.Column="2">
-                                        <TextBlock Text="Headset Microphone" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource MutedText}" Margin="0,0,0,5"/>
+                                        <StackPanel Orientation="Horizontal" Margin="0,0,0,5">
+                                            <TextBlock Text="Headset Microphone" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource MutedText}"/>
+                                            <TextBlock x:Name="HeadsetActiveLabel" Text="" FontSize="11" FontWeight="Bold" Margin="8,0,0,0"/>
+                                        </StackPanel>
                                         <ComboBox x:Name="HeadsetMicComboBox" Height="30" SelectionChanged="OnMicSelectionChanged"/>
                                     </StackPanel>
                                 </Grid>
@@ -337,7 +343,7 @@
                                 <Separator Background="{DynamicResource BorderBrush}" Margin="0,0,0,15"/>
 
                                 <!-- Levels -->
-                                <TextBlock Text="Real-time Volume Levels (WASAPI)" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource MutedText}" Margin="0,0,0,10"/>
+                                <TextBlock Text="Real-time Volume Levels (WinMM)" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource MutedText}" Margin="0,0,0,10"/>
                                 
                                 <Grid Margin="0,0,0,8">
                                     <Grid.ColumnDefinitions>

@@ -129,6 +129,45 @@ public partial class MainWindow : Window
 
         AnimateBar(DeskLevelBar, DeskLevelValue, deskLevel, FindResource("AccentColor") as SolidColorBrush ?? new SolidColorBrush(Color.FromRgb(6, 182, 212)));
         AnimateBar(HeadsetLevelBar, HeadsetLevelValue, headsetLevel, FindResource("SecondaryAccentColor") as SolidColorBrush ?? new SolidColorBrush(Color.FromRgb(16, 185, 129)));
+
+        // Update active microphone indicators
+        try
+        {
+            var activeMics = _switcher.GetActiveMicrophones();
+            var defaultMic = activeMics.FirstOrDefault(m => m.IsDefaultCommunications);
+            if (defaultMic != null)
+            {
+                string deskName = DeskMicComboBox.SelectedItem as string ?? string.Empty;
+                string headsetName = HeadsetMicComboBox.SelectedItem as string ?? string.Empty;
+
+                if (!string.IsNullOrEmpty(deskName) && defaultMic.Name.Equals(deskName, StringComparison.OrdinalIgnoreCase))
+                {
+                    DeskActiveLabel.Text = "• Active";
+                    DeskActiveLabel.Foreground = FindResource("AccentColor") as Brush;
+                    HeadsetActiveLabel.Text = "";
+                }
+                else if (!string.IsNullOrEmpty(headsetName) && defaultMic.Name.Equals(headsetName, StringComparison.OrdinalIgnoreCase))
+                {
+                    HeadsetActiveLabel.Text = "• Active";
+                    HeadsetActiveLabel.Foreground = FindResource("SecondaryAccentColor") as Brush;
+                    DeskActiveLabel.Text = "";
+                }
+                else
+                {
+                    DeskActiveLabel.Text = "";
+                    HeadsetActiveLabel.Text = "";
+                }
+            }
+            else
+            {
+                DeskActiveLabel.Text = "";
+                HeadsetActiveLabel.Text = "";
+            }
+        }
+        catch
+        {
+            // Fail silently on timer error
+        }
     }
 
     private void AnimateBar(ProgressBar bar, TextBlock valueText, float targetLevel, SolidColorBrush activeColor)

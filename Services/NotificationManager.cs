@@ -10,9 +10,14 @@ public static class NotificationManager
 {
     private static NotifyIcon? _notifyIcon;
     private static ContextMenuStrip? _contextMenu;
+    private static WindowsAudioDeviceSwitcher? _switcher;
+    private static AutoSwitchService? _autoSwitchService;
 
     public static void Initialize(WindowsAudioDeviceSwitcher switcher, AutoSwitchService autoSwitchService)
     {
+        _switcher = switcher;
+        _autoSwitchService = autoSwitchService;
+
         try
         {
             _notifyIcon = new NotifyIcon
@@ -137,13 +142,27 @@ public static class NotificationManager
     {
         Application.Current.Dispatcher.Invoke(() =>
         {
-            var win = Application.Current.MainWindow;
+            var win = Application.Current.MainWindow as MainWindow;
+            if (win == null)
+            {
+                if (_switcher != null && _autoSwitchService != null)
+                {
+                    Log.Information("MainWindow was null (e.g. started in tray). Instantiating on demand.");
+                    win = new MainWindow(_switcher, _autoSwitchService);
+                    Application.Current.MainWindow = win;
+                }
+            }
+
             if (win != null)
             {
                 win.Show();
                 win.WindowState = WindowState.Normal;
                 win.Activate();
-                Log.Debug("MainWindow restored from system tray.");
+                Log.Debug("MainWindow restored/created from system tray.");
+            }
+            else
+            {
+                Log.Error("Failed to restore MainWindow: switcher or autoSwitchService is null.");
             }
         });
     }
