@@ -10,9 +10,10 @@ public sealed class AutoSwitchService : IDisposable
     private AudioMonitorService? _deskMonitor;
     private AudioMonitorService? _headsetMonitor;
     private CancellationTokenSource? _cts;
-    private bool _isRunning;
+    private bool _isAutoSwitchLogicActive;
+    private bool _isMonitorsActive;
 
-    public bool IsRunning => _isRunning;
+    public bool IsRunning => _isAutoSwitchLogicActive;
 
     public float DeskPeakLevel => _deskMonitor?.CurrentPeakLevel ?? 0f;
     public float HeadsetPeakLevel => _headsetMonitor?.CurrentPeakLevel ?? 0f;
@@ -22,27 +23,37 @@ public sealed class AutoSwitchService : IDisposable
         _switcher = switcher;
         _deskName = deskName;
         _headsetName = headsetName;
+
+        StartMonitors();
     }
 
     public void UpdateMicrophones(string deskName, string headsetName)
     {
-        bool wasRunning = _isRunning;
-        Stop();
+        StopMonitors();
         _deskName = deskName;
         _headsetName = headsetName;
-        if (wasRunning)
-        {
-            Start();
-        }
+        StartMonitors();
     }
 
     public void Start()
     {
-        if (_isRunning) return;
+        _isAutoSwitchLogicActive = true;
+        Log.Information("AutoSwitch logic enabled.");
+    }
+
+    public void Stop()
+    {
+        _isAutoSwitchLogicActive = false;
+        Log.Information("AutoSwitch logic disabled.");
+    }
+
+    private void StartMonitors()
+    {
+        if (_isMonitorsActive) return;
 
         if (string.IsNullOrEmpty(_deskName) || string.IsNullOrEmpty(_headsetName))
         {
-            Log.Warning("AutoSwitch: Microphone names are not configured. Cannot start service.");
+            Log.Warning("AutoSwitch: Microphone names are not configured. Monitors not started.");
             return;
         }
 
@@ -53,22 +64,22 @@ public sealed class AutoSwitchService : IDisposable
         }
         catch (Exception ex)
         {
-            Log.Error(ex, "Failed to start audio monitors for AutoSwitchService.");
-            NotificationManager.Show("MicShift Error", "Failed to start audio monitors for auto-switching.");
-            Stop();
+            Log.Error(ex, "Failed to start audio monitors.");
+            NotificationManager.Show("MicShift Error", "Failed to start audio monitors.");
+            StopMonitors();
             return;
         }
 
         _cts = new CancellationTokenSource();
-        _isRunning = true;
+        _isMonitorsActive = true;
 
         Task.Run(() => RunAutoSwitchLoopAsync(_cts.Token));
-        Log.Information("AutoSwitchService started.");
+        Log.Information("AutoSwitch audio monitors started.");
     }
 
-    public void Stop()
+    private void StopMonitors()
     {
-        if (!_isRunning) return;
+        if (!_isMonitorsActive) return;
 
         _cts?.Cancel();
         _cts?.Dispose();
@@ -79,8 +90,8 @@ public sealed class AutoSwitchService : IDisposable
         _deskMonitor = null;
         _headsetMonitor = null;
 
-        _isRunning = false;
-        Log.Information("AutoSwitchService stopped.");
+        _isMonitorsActive = false;
+        Log.Information("AutoSwitch audio monitors stopped.");
     }
 
     private async Task RunAutoSwitchLoopAsync(CancellationToken token)
@@ -112,42 +123,43 @@ public sealed class AutoSwitchService : IDisposable
                 float deskLevel = _deskMonitor.CurrentPeakLevel;
                 float headsetLevel = _headsetMonitor.CurrentPeakLevel;
 
-                // Only evaluate if at least one microphone detects sound above the silence floor
-                if (deskLevel > silenceThreshold || headsetLevel > silenceThreshold)
+                // Only perform auto-switching check if enabled
+                if (_isAutoSwitchLogicActive)
                 {
-                    if (deskLevel > headsetLevel * 1.5f)
+                    if (deskLevel > silenceThreshold || headsetLevel > silenceThreshold)
                     {
-                        deskWinsCount++;
-                        headsetWinsCount = 0;
-                    }
-                    else if (headsetLevel > deskLevel * 1.5f)
-                    {
-                        headsetWinsCount++;
-                        deskWinsCount = 0;
+                        if (deskLevel > headsetLevel * 1.5f)
+                        {
+                            deskWinsCount++;
+                            headsetWinsCount = 0;
+                        }
+                        else if (headsetLevel > deskLevel * 1.5f)
+                        {
+                            headsetWinsCount++;
+                            deskWinsCount = 0;
+                        }
+                        else
+                        {
+                            if (deskWinsCount > 0) deskWinsCount--;
+                            if (headsetWinsCount > 0) headsetWinsCount--;
+                        }
+
+                        if (deskWinsCount >= requiredConsecutiveSamples)
+                        {
+                            deskWinsCount = 0;
+                            await SwitchIfNecessaryAsync(_deskName);
+                        }
+                        else if (headsetWinsCount >= requiredConsecutiveSamples)
+                        {
+                            headsetWinsCount = 0;
+                            await SwitchIfNecessaryAsync(_headsetName);
+                        }
                     }
                     else
                     {
-                        // Levels are too close, decay wins slowly to avoid switching on momentary spikes
                         if (deskWinsCount > 0) deskWinsCount--;
                         if (headsetWinsCount > 0) headsetWinsCount--;
                     }
-
-                    if (deskWinsCount >= requiredConsecutiveSamples)
-                    {
-                        deskWinsCount = 0;
-                        await SwitchIfNecessaryAsync(_deskName);
-                    }
-                    else if (headsetWinsCount >= requiredConsecutiveSamples)
-                    {
-                        headsetWinsCount = 0;
-                        await SwitchIfNecessaryAsync(_headsetName);
-                    }
-                }
-                else
-                {
-                    // Ambient silence, cool down win counters
-                    if (deskWinsCount > 0) deskWinsCount--;
-                    if (headsetWinsCount > 0) headsetWinsCount--;
                 }
             }
             catch (Exception ex)
@@ -169,7 +181,7 @@ public sealed class AutoSwitchService : IDisposable
             
             if (currentDefault != null && currentDefault.Name.Equals(targetDeviceName, StringComparison.OrdinalIgnoreCase))
             {
-                return; // Device is already active/default
+                return;
             }
 
             var target = mics.FirstOrDefault(m => m.Name.Equals(targetDeviceName, StringComparison.OrdinalIgnoreCase));
@@ -191,6 +203,6 @@ public sealed class AutoSwitchService : IDisposable
 
     public void Dispose()
     {
-        Stop();
+        StopMonitors();
     }
 }

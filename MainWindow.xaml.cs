@@ -1,8 +1,12 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Threading;
 using Serilog;
+
+using Color = System.Windows.Media.Color;
+using ProgressBar = System.Windows.Controls.ProgressBar;
 
 namespace MicShift;
 
@@ -34,6 +38,12 @@ public partial class MainWindow : Window
     {
         try
         {
+            // Start pulsing status indicator animation
+            if (FindResource("PulseStoryboard") is Storyboard pulseStoryboard)
+            {
+                pulseStoryboard.Begin(this);
+            }
+
             RefreshMicrophoneLists();
 
             // Load saved settings
@@ -53,7 +63,6 @@ public partial class MainWindow : Window
             bool isConfigured = !string.IsNullOrEmpty(settings.DeskMicrophoneName) && !string.IsNullOrEmpty(settings.HeadsetMicrophoneName);
             if (!isConfigured)
             {
-                // Disable auto-switching if not configured
                 settings.AutoSwitchEnabled = false;
                 SettingsManager.Save(settings);
                 _autoSwitch.Stop();
@@ -103,22 +112,34 @@ public partial class MainWindow : Window
         float deskLevel = _autoSwitch.DeskPeakLevel;
         float headsetLevel = _autoSwitch.HeadsetPeakLevel;
 
-        DeskLevelBar.Value = deskLevel * 100f;
-        DeskLevelValue.Text = $"{deskLevel * 100f:F1}%";
+        AnimateBar(DeskLevelBar, DeskLevelValue, deskLevel, new SolidColorBrush(Color.FromRgb(6, 182, 212))); // Cyan
+        AnimateBar(HeadsetLevelBar, HeadsetLevelValue, headsetLevel, new SolidColorBrush(Color.FromRgb(16, 185, 129))); // Emerald Green
+    }
 
-        // Dynamic color shifting for volume peak visualization
-        if (deskLevel >= 0.8f)
-            DeskLevelBar.Foreground = new SolidColorBrush(System.Windows.Media.Color.FromRgb(239, 68, 68)); // Red
+    private void AnimateBar(ProgressBar bar, TextBlock valueText, float targetLevel, SolidColorBrush activeColor)
+    {
+        float targetValue = targetLevel * 100f;
+
+        // Smoothly animate ProgressBar Value
+        var animation = new DoubleAnimation
+        {
+            To = targetValue,
+            Duration = TimeSpan.FromMilliseconds(100),
+            EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut }
+        };
+        bar.BeginAnimation(ProgressBar.ValueProperty, animation);
+
+        valueText.Text = $"{targetValue:F1}%";
+
+        // Dynamic warning color for peaks above 80%
+        if (targetLevel >= 0.8f)
+        {
+            bar.Foreground = new SolidColorBrush(Color.FromRgb(239, 68, 68)); // Red
+        }
         else
-            DeskLevelBar.Foreground = new SolidColorBrush(System.Windows.Media.Color.FromRgb(6, 182, 212)); // Cyan
-
-        HeadsetLevelBar.Value = headsetLevel * 100f;
-        HeadsetLevelValue.Text = $"{headsetLevel * 100f:F1}%";
-
-        if (headsetLevel >= 0.8f)
-            HeadsetLevelBar.Foreground = new SolidColorBrush(System.Windows.Media.Color.FromRgb(239, 68, 68)); // Red
-        else
-            HeadsetLevelBar.Foreground = new SolidColorBrush(System.Windows.Media.Color.FromRgb(16, 185, 129)); // Emerald Green
+        {
+            bar.Foreground = activeColor;
+        }
     }
 
     private void OnMicSelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -148,7 +169,7 @@ public partial class MainWindow : Window
         
         SettingsManager.Save(settings);
 
-        // Update active service
+        // Update active service (this will also update active monitors dynamically!)
         _autoSwitch.UpdateMicrophones(deskName, headsetName);
         UpdateStatusUI();
         Log.Information("UI Mic Switch configured: Desk={DeskName}, Headset={HeadsetName}", deskName, headsetName);
@@ -180,12 +201,12 @@ public partial class MainWindow : Window
     {
         if (_autoSwitch.IsRunning)
         {
-            StatusIndicator.Fill = new SolidColorBrush(System.Windows.Media.Color.FromRgb(16, 185, 129)); // Emerald Green
+            StatusIndicator.Fill = new SolidColorBrush(Color.FromRgb(16, 185, 129)); // Emerald Green
             StatusText.Text = "Auto-Switching is Active";
         }
         else
         {
-            StatusIndicator.Fill = new SolidColorBrush(System.Windows.Media.Color.FromRgb(239, 68, 68)); // Red
+            StatusIndicator.Fill = new SolidColorBrush(Color.FromRgb(239, 68, 68)); // Red
             StatusText.Text = "Auto-Switching is Inactive";
         }
     }
