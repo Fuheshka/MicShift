@@ -3,6 +3,8 @@ name: Build and Release MicShift
 on:
   push:
     branches: [ "main" ]
+    tags:
+      - 'v*'
   pull_request:
     branches: [ "main" ]
   workflow_dispatch:
@@ -41,3 +43,13 @@ jobs:
       with:
         name: MicShift-win-x64
         path: ./publish/MicShift.exe
+
+    - name: Create Release and Upload Assets
+      if: startsWith(github.ref, 'refs/tags/v')
+      uses: softprops/action-gh-release@v2
+      with:
+        files: ./publish/MicShift.exe
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

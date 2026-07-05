@@ -5,8 +5,8 @@ namespace MicShift;
 public sealed class AutoSwitchService : IDisposable
 {
     private readonly IAudioDeviceSwitcher _switcher;
-    private readonly string _deskName;
-    private readonly string _headsetName;
+    private string _deskName;
+    private string _headsetName;
     private AudioMonitorService? _deskMonitor;
     private AudioMonitorService? _headsetMonitor;
     private CancellationTokenSource? _cts;
@@ -14,11 +14,26 @@ public sealed class AutoSwitchService : IDisposable
 
     public bool IsRunning => _isRunning;
 
+    public float DeskPeakLevel => _deskMonitor?.CurrentPeakLevel ?? 0f;
+    public float HeadsetPeakLevel => _headsetMonitor?.CurrentPeakLevel ?? 0f;
+
     public AutoSwitchService(IAudioDeviceSwitcher switcher, string deskName, string headsetName)
     {
         _switcher = switcher;
         _deskName = deskName;
         _headsetName = headsetName;
+    }
+
+    public void UpdateMicrophones(string deskName, string headsetName)
+    {
+        bool wasRunning = _isRunning;
+        Stop();
+        _deskName = deskName;
+        _headsetName = headsetName;
+        if (wasRunning)
+        {
+            Start();
+        }
     }
 
     public void Start()
