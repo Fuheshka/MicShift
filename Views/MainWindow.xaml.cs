@@ -19,6 +19,7 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _timer;
     private bool _isInitializing = true;
     private bool _isExplicitExit = false;
+    private int _activeIndicatorTickCounter = 0;
 
     public MainWindow(WindowsAudioDeviceSwitcher switcher, AutoSwitchService autoSwitch)
     {
@@ -86,7 +87,9 @@ public partial class MainWindow : Window
 
             _isInitializing = false;
 
-            // Force update microphones on load to initialize monitors
+            // Start monitors exactly once — only if both mics are configured.
+            // We do NOT call UpdateMicrophones() from the constructor of AutoSwitchService
+            // to avoid a double-start race condition (Bug #2/#3).
             if (isConfigured)
             {
                 _autoSwitch.UpdateMicrophones(settings.DeskMicrophoneName, settings.HeadsetMicrophoneName);
@@ -130,43 +133,48 @@ public partial class MainWindow : Window
         AnimateBar(DeskLevelBar, DeskLevelValue, deskLevel, FindResource("AccentColor") as SolidColorBrush ?? new SolidColorBrush(Color.FromRgb(6, 182, 212)));
         AnimateBar(HeadsetLevelBar, HeadsetLevelValue, headsetLevel, FindResource("SecondaryAccentColor") as SolidColorBrush ?? new SolidColorBrush(Color.FromRgb(16, 185, 129)));
 
-        // Update active microphone indicators
-        try
+        // Update active microphone indicators — throttled to ~1 Hz (every 30 ticks at 33ms).
+        _activeIndicatorTickCounter++;
+        if (_activeIndicatorTickCounter >= 30)
         {
-            var activeMics = _switcher.GetActiveMicrophones();
-            var defaultMic = activeMics.FirstOrDefault(m => m.IsDefaultCommunications);
-            if (defaultMic != null)
+            _activeIndicatorTickCounter = 0;
+            try
             {
-                string deskName = DeskMicComboBox.SelectedItem as string ?? string.Empty;
-                string headsetName = HeadsetMicComboBox.SelectedItem as string ?? string.Empty;
+                var activeMics = _switcher.GetActiveMicrophones();
+                var defaultMic = activeMics.FirstOrDefault(m => m.IsDefaultCommunications);
+                if (defaultMic != null)
+                {
+                    string deskName    = DeskMicComboBox.SelectedItem    as string ?? string.Empty;
+                    string headsetName = HeadsetMicComboBox.SelectedItem as string ?? string.Empty;
 
-                if (!string.IsNullOrEmpty(deskName) && defaultMic.Name.Equals(deskName, StringComparison.OrdinalIgnoreCase))
-                {
-                    DeskActiveLabel.Text = "• Active";
-                    DeskActiveLabel.Foreground = FindResource("AccentColor") as Brush;
-                    HeadsetActiveLabel.Text = "";
-                }
-                else if (!string.IsNullOrEmpty(headsetName) && defaultMic.Name.Equals(headsetName, StringComparison.OrdinalIgnoreCase))
-                {
-                    HeadsetActiveLabel.Text = "• Active";
-                    HeadsetActiveLabel.Foreground = FindResource("SecondaryAccentColor") as Brush;
-                    DeskActiveLabel.Text = "";
+                    if (!string.IsNullOrEmpty(deskName) && defaultMic.Name.Equals(deskName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        DeskActiveLabel.Text       = "• Active";
+                        DeskActiveLabel.Foreground = FindResource("AccentColor") as Brush;
+                        HeadsetActiveLabel.Text    = "";
+                    }
+                    else if (!string.IsNullOrEmpty(headsetName) && defaultMic.Name.Equals(headsetName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        HeadsetActiveLabel.Text       = "• Active";
+                        HeadsetActiveLabel.Foreground = FindResource("SecondaryAccentColor") as Brush;
+                        DeskActiveLabel.Text          = "";
+                    }
+                    else
+                    {
+                        DeskActiveLabel.Text    = "";
+                        HeadsetActiveLabel.Text = "";
+                    }
                 }
                 else
                 {
-                    DeskActiveLabel.Text = "";
+                    DeskActiveLabel.Text    = "";
                     HeadsetActiveLabel.Text = "";
                 }
             }
-            else
+            catch
             {
-                DeskActiveLabel.Text = "";
-                HeadsetActiveLabel.Text = "";
+                // Fail silently — COM enumeration may not be available every tick.
             }
-        }
-        catch
-        {
-            // Fail silently on timer error
         }
     }
 

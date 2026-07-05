@@ -10,23 +10,30 @@ public sealed class AutoSwitchService : IDisposable
     private AudioMonitorService? _deskMonitor;
     private AudioMonitorService? _headsetMonitor;
     private CancellationTokenSource? _cts;
-    private bool _isAutoSwitchLogicActive;
-    private bool _isMonitorsActive;
+    private volatile bool _isAutoSwitchLogicActive;
+    private volatile bool _isMonitorsActive;
 
     public bool IsRunning => _isAutoSwitchLogicActive;
 
     public float DeskPeakLevel => _deskMonitor?.CurrentPeakLevel ?? 0f;
     public float HeadsetPeakLevel => _headsetMonitor?.CurrentPeakLevel ?? 0f;
 
+    /// <summary>
+    /// Creates the service. Does NOT start monitors automatically — call UpdateMicrophones() explicitly.
+    /// </summary>
     public AutoSwitchService(IAudioDeviceSwitcher switcher, string deskName, string headsetName)
     {
         _switcher = switcher;
         _deskName = deskName;
         _headsetName = headsetName;
-
-        StartMonitors();
+        // NOTE: intentionally NOT calling StartMonitors() here.
+        // The UI (MainWindow) is responsible for calling UpdateMicrophones() once it is ready,
+        // to avoid a double-start race where App.OnStartup and OnWindowLoaded both start monitors.
     }
 
+    /// <summary>
+    /// Restarts monitors with the new device names. Safe to call multiple times.
+    /// </summary>
     public void UpdateMicrophones(string deskName, string headsetName)
     {
         StopMonitors();
@@ -59,13 +66,12 @@ public sealed class AutoSwitchService : IDisposable
 
         try
         {
-            _deskMonitor = new AudioMonitorService(_deskName);
+            _deskMonitor    = new AudioMonitorService(_deskName);
             _headsetMonitor = new AudioMonitorService(_headsetName);
         }
         catch (Exception ex)
         {
-            Log.Error(ex, "Failed to start audio monitors.");
-            NotificationManager.Show("MicShift Error", "Failed to start audio monitors.");
+            Log.Error(ex, "Failed to instantiate audio monitors.");
             StopMonitors();
             return;
         }
@@ -73,6 +79,7 @@ public sealed class AutoSwitchService : IDisposable
         _cts = new CancellationTokenSource();
         _isMonitorsActive = true;
 
+        // Kick off the read loop on a background thread.
         Task.Run(() => RunAutoSwitchLoopAsync(_cts.Token));
         Log.Information("AutoSwitch audio monitors started.");
     }
@@ -87,7 +94,7 @@ public sealed class AutoSwitchService : IDisposable
 
         _deskMonitor?.Dispose();
         _headsetMonitor?.Dispose();
-        _deskMonitor = null;
+        _deskMonitor    = null;
         _headsetMonitor = null;
 
         _isMonitorsActive = false;
@@ -96,34 +103,45 @@ public sealed class AutoSwitchService : IDisposable
 
     private async Task RunAutoSwitchLoopAsync(CancellationToken token)
     {
-        const float silenceThreshold = 0.03f; // 3% volume floor
-        const int requiredConsecutiveSamples = 6; // ~200ms of consistent volume difference
-        
-        int deskWinsCount = 0;
+        const float silenceThreshold          = 0.03f; // 3% volume floor
+        const int   requiredConsecutiveSamples = 6;    // ~200ms of consistent difference
+
+        int deskWinsCount    = 0;
         int headsetWinsCount = 0;
 
         while (!token.IsCancellationRequested)
         {
             try
             {
-                if (_deskMonitor == null || _headsetMonitor == null)
-                    break;
+                // Monitors may have been replaced — capture references atomically.
+                var deskMon    = _deskMonitor;
+                var headsetMon = _headsetMonitor;
 
-                if (_deskMonitor.LastException != null)
+                if (deskMon == null || headsetMon == null)
                 {
-                    Log.Error(_deskMonitor.LastException, "Desk microphone error in AutoSwitchService.");
-                    break;
-                }
-                if (_headsetMonitor.LastException != null)
-                {
-                    Log.Error(_headsetMonitor.LastException, "Headset microphone error in AutoSwitchService.");
-                    break;
+                    // Monitors not ready yet — just wait.
+                    await Task.Delay(50, token).ConfigureAwait(false);
+                    continue;
                 }
 
-                float deskLevel = _deskMonitor.CurrentPeakLevel;
-                float headsetLevel = _headsetMonitor.CurrentPeakLevel;
+                // Bug #4 fix: log the error but CONTINUE the loop instead of breaking.
+                if (deskMon.LastException != null)
+                {
+                    Log.Warning("Desk monitor has an error, skipping this tick: {Msg}", deskMon.LastException.Message);
+                    await Task.Delay(100, token).ConfigureAwait(false);
+                    continue;
+                }
+                if (headsetMon.LastException != null)
+                {
+                    Log.Warning("Headset monitor has an error, skipping this tick: {Msg}", headsetMon.LastException.Message);
+                    await Task.Delay(100, token).ConfigureAwait(false);
+                    continue;
+                }
 
-                // Only perform auto-switching check if enabled
+                float deskLevel    = deskMon.CurrentPeakLevel;
+                float headsetLevel = headsetMon.CurrentPeakLevel;
+
+                // Auto-switching logic (only when the user has enabled it).
                 if (_isAutoSwitchLogicActive)
                 {
                     if (deskLevel > silenceThreshold || headsetLevel > silenceThreshold)
@@ -140,54 +158,64 @@ public sealed class AutoSwitchService : IDisposable
                         }
                         else
                         {
-                            if (deskWinsCount > 0) deskWinsCount--;
+                            if (deskWinsCount    > 0) deskWinsCount--;
                             if (headsetWinsCount > 0) headsetWinsCount--;
                         }
 
                         if (deskWinsCount >= requiredConsecutiveSamples)
                         {
                             deskWinsCount = 0;
-                            await SwitchIfNecessaryAsync(_deskName);
+                            await SwitchIfNecessaryAsync(_deskName).ConfigureAwait(false);
                         }
                         else if (headsetWinsCount >= requiredConsecutiveSamples)
                         {
                             headsetWinsCount = 0;
-                            await SwitchIfNecessaryAsync(_headsetName);
+                            await SwitchIfNecessaryAsync(_headsetName).ConfigureAwait(false);
                         }
                     }
                     else
                     {
-                        if (deskWinsCount > 0) deskWinsCount--;
+                        if (deskWinsCount    > 0) deskWinsCount--;
                         if (headsetWinsCount > 0) headsetWinsCount--;
                     }
                 }
             }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
             catch (Exception ex)
             {
-                Log.Error(ex, "Error in AutoSwitch loop execution.");
+                Log.Error(ex, "Unexpected error in AutoSwitch loop — continuing.");
             }
 
-            try { await Task.Delay(33, token); }
-            catch (TaskCanceledException) { break; }
+            try
+            {
+                await Task.Delay(33, token).ConfigureAwait(false); // ~30 Hz
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
         }
+
+        Log.Debug("RunAutoSwitchLoopAsync exited.");
     }
 
     private async Task SwitchIfNecessaryAsync(string targetDeviceName)
     {
         try
         {
-            var mics = _switcher.GetActiveMicrophones();
+            var mics           = _switcher.GetActiveMicrophones();
             var currentDefault = mics.FirstOrDefault(m => m.IsDefaultCommunications);
-            
+
             if (currentDefault != null && currentDefault.Name.Equals(targetDeviceName, StringComparison.OrdinalIgnoreCase))
-            {
                 return;
-            }
 
             var target = mics.FirstOrDefault(m => m.Name.Equals(targetDeviceName, StringComparison.OrdinalIgnoreCase));
             if (target != null)
             {
-                bool success = await _switcher.SetDefaultCommunicationsMicrophoneAsync(target.Id);
+                bool success = await _switcher.SetDefaultCommunicationsMicrophoneAsync(target.Id).ConfigureAwait(false);
                 if (success)
                 {
                     Log.Information("AutoSwitch: Switched default microphone to {DeviceName}", target.Name);
