@@ -7,7 +7,7 @@
         Foreground="#F4F4F5"
         WindowStartupLocation="CenterScreen"
         ResizeMode="NoResize"
-        Icon="micshift.ico">
+        Icon="logo.png">
     <Grid Margin="20">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/> <!-- Header -->

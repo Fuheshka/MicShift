@@ -22,6 +22,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Resource Include="micshift.ico" />
+    <Resource Include="logo.png" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Compile Remove="MicShift.Tests\**" />
     <EmbeddedResource Remove="MicShift.Tests\**" />
     <None Remove="MicShift.Tests\**" />

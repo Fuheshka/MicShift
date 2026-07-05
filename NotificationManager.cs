@@ -21,18 +21,25 @@ public static class NotificationManager
                 Text = "MicShift"
             };
 
-            // Try to load custom icon
-            string iconPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "micshift.ico");
-            if (File.Exists(iconPath))
+            // Try to load custom icon from embedded WPF resources
+            try
             {
-                _notifyIcon.Icon = new System.Drawing.Icon(iconPath);
+                var resourceUri = new Uri("pack://application:,,,/logo.png");
+                var streamResourceInfo = Application.GetResourceStream(resourceUri);
+                if (streamResourceInfo != null)
+                {
+                    using var stream = streamResourceInfo.Stream;
+                    using var bitmap = new System.Drawing.Bitmap(stream);
+                    _notifyIcon.Icon = System.Drawing.Icon.FromHandle(bitmap.GetHicon());
+                }
+                else
+                {
+                    _notifyIcon.Icon = System.Drawing.SystemIcons.Information;
+                }
             }
-            else if (File.Exists("micshift.ico"))
+            catch (Exception ex)
             {
-                _notifyIcon.Icon = new System.Drawing.Icon("micshift.ico");
-            }
-            else
-            {
+                Log.Warning(ex, "Failed to load tray icon from resources. Falling back to default.");
                 _notifyIcon.Icon = System.Drawing.SystemIcons.Information;
             }
 
