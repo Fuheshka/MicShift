@@ -2,12 +2,125 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="MicShift" 
-        Height="430" Width="520"
+        Height="460" Width="520"
         Background="#18181B"
         Foreground="#F4F4F5"
         WindowStartupLocation="CenterScreen"
         ResizeMode="NoResize"
         Icon="logo.png">
+    
+    <Window.Resources>
+        <!-- iOS/Win11 Style Toggle Switch -->
+        <Style x:Key="ToggleSwitchStyle" TargetType="CheckBox">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="CheckBox">
+                        <StackPanel Orientation="Horizontal">
+                            <Grid x:Name="Grid" Width="44" Height="22" Cursor="Hand">
+                                <Border x:Name="BackgroundBorder" Background="#3F3F46" CornerRadius="11" BorderThickness="0"/>
+                                <Border x:Name="Thumb" Background="#F4F4F5" Width="18" Height="18" CornerRadius="9" HorizontalAlignment="Left" Margin="2,0,0,0"/>
+                            </Grid>
+                            <ContentPresenter Margin="10,0,0,0" VerticalAlignment="Center"/>
+                        </StackPanel>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="BackgroundBorder" Property="Background" Value="#06B6D4"/>
+                                <Setter TargetName="Thumb" Property="HorizontalAlignment" Value="Right"/>
+                                <Setter TargetName="Thumb" Property="Margin" Value="0,0,2,0"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="BackgroundBorder" Property="Background" Value="#27272A"/>
+                                <Setter TargetName="Thumb" Property="Background" Value="#71717A"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Flat Modern Progress Bar -->
+        <Style TargetType="ProgressBar">
+            <Setter Property="Background" Value="#18181B"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ProgressBar">
+                        <Grid x:Name="TemplateRoot">
+                            <Border Background="{TemplateBinding Background}" CornerRadius="4"/>
+                            <Border x:Name="PART_Indicator" HorizontalAlignment="Left" Background="{TemplateBinding Foreground}" CornerRadius="4"/>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Modern Flat Button -->
+        <Style x:Key="ModernButtonStyle" TargetType="Button">
+            <Setter Property="Background" Value="#27272A"/>
+            <Setter Property="Foreground" Value="#F4F4F5"/>
+            <Setter Property="BorderBrush" Value="#3F3F46"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="10,5"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Border" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="6" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Background" Value="#3F3F46"/>
+                                <Setter Property="BorderBrush" Value="#52525B"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter Property="Background" Value="#18181B"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Foreground" Value="#71717A"/>
+                                <Setter Property="Background" Value="#27272A"/>
+                                <Setter Property="BorderBrush" Value="#27272A"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Modern Flat Danger Button -->
+        <Style x:Key="DangerButtonStyle" TargetType="Button" BasedOn="{StaticResource ModernButtonStyle}">
+            <Setter Property="Background" Value="#DC2626"/>
+            <Setter Property="Foreground" Value="#FFFFFF"/>
+            <Setter Property="BorderBrush" Value="Transparent"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Border" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="6" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Background" Value="#EF4444"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter Property="Background" Value="#B91C1C"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Modern ComboBox Styling -->
+        <Style TargetType="ComboBox">
+            <Setter Property="Background" Value="#18181B"/>
+            <Setter Property="Foreground" Value="#F4F4F5"/>
+            <Setter Property="BorderBrush" Value="#3F3F46"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="6,4"/>
+        </Style>
+    </Window.Resources>
+
     <Grid Margin="20">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/> <!-- Header -->
@@ -91,7 +204,7 @@
                         <TextBlock Text="Automatic Switching (Auto-Distance)" FontWeight="SemiBold" FontSize="13" Foreground="#F4F4F5"/>
                         <TextBlock Text="Switches to the closest mic based on speech levels" FontSize="11" Foreground="#71717A"/>
                     </StackPanel>
-                    <CheckBox x:Name="AutoSwitchToggle" Grid.Column="1" VerticalAlignment="Center" Checked="OnAutoSwitchToggled" Unchecked="OnAutoSwitchToggled" IsChecked="False"/>
+                    <CheckBox x:Name="AutoSwitchToggle" Grid.Column="1" VerticalAlignment="Center" Checked="OnAutoSwitchToggled" Unchecked="OnAutoSwitchToggled" IsChecked="False" Style="{StaticResource ToggleSwitchStyle}"/>
                 </Grid>
             </StackPanel>
         </Border>
@@ -102,10 +215,10 @@
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
-            <TextBlock Grid.Column="0" Text="v1.0.0" FontSize="11" Foreground="#71717A" VerticalAlignment="Center"/>
+            <TextBlock x:Name="VersionTextBlock" Grid.Column="0" Text="v0.3.0" FontSize="11" Foreground="#71717A" VerticalAlignment="Center"/>
             <StackPanel Grid.Column="1" Orientation="Horizontal">
-                <Button Content="Minimize to Tray" Width="120" Height="30" Click="OnMinimizeToTrayClick" Margin="0,0,10,0"/>
-                <Button Content="Exit" Width="80" Height="30" Click="OnExitClick" Background="#EF4444" Foreground="#FFFFFF" BorderBrush="Transparent"/>
+                <Button Content="Minimize to Tray" Width="120" Height="30" Click="OnMinimizeToTrayClick" Margin="0,0,10,0" Style="{StaticResource ModernButtonStyle}"/>
+                <Button Content="Exit" Width="80" Height="30" Click="OnExitClick" Style="{StaticResource DangerButtonStyle}"/>
             </StackPanel>
         </Grid>
     </Grid>

@@ -49,12 +49,31 @@ public partial class MainWindow : Window
                 HeadsetMicComboBox.SelectedItem = settings.HeadsetMicrophoneName;
             }
 
-            AutoSwitchToggle.IsChecked = settings.AutoSwitchEnabled;
+            // Check if microphones are configured
+            bool isConfigured = !string.IsNullOrEmpty(settings.DeskMicrophoneName) && !string.IsNullOrEmpty(settings.HeadsetMicrophoneName);
+            if (!isConfigured)
+            {
+                // Disable auto-switching if not configured
+                settings.AutoSwitchEnabled = false;
+                SettingsManager.Save(settings);
+                _autoSwitch.Stop();
+                AutoSwitchToggle.IsChecked = false;
+                AutoSwitchToggle.IsEnabled = false;
+            }
+            else
+            {
+                AutoSwitchToggle.IsEnabled = true;
+                AutoSwitchToggle.IsChecked = settings.AutoSwitchEnabled;
+            }
 
             _isInitializing = false;
 
             UpdateStatusUI();
             _timer.Start();
+
+            // Get executing version
+            var version = typeof(App).Assembly.GetName().Version;
+            VersionTextBlock.Text = version != null ? $"v{version.Major}.{version.Minor}.{version.Build}" : "v0.3.0";
 
             Log.Information("MainWindow UI initialized and shown.");
         }
@@ -87,8 +106,19 @@ public partial class MainWindow : Window
         DeskLevelBar.Value = deskLevel * 100f;
         DeskLevelValue.Text = $"{deskLevel * 100f:F1}%";
 
+        // Dynamic color shifting for volume peak visualization
+        if (deskLevel >= 0.8f)
+            DeskLevelBar.Foreground = new SolidColorBrush(System.Windows.Media.Color.FromRgb(239, 68, 68)); // Red
+        else
+            DeskLevelBar.Foreground = new SolidColorBrush(System.Windows.Media.Color.FromRgb(6, 182, 212)); // Cyan
+
         HeadsetLevelBar.Value = headsetLevel * 100f;
         HeadsetLevelValue.Text = $"{headsetLevel * 100f:F1}%";
+
+        if (headsetLevel >= 0.8f)
+            HeadsetLevelBar.Foreground = new SolidColorBrush(System.Windows.Media.Color.FromRgb(239, 68, 68)); // Red
+        else
+            HeadsetLevelBar.Foreground = new SolidColorBrush(System.Windows.Media.Color.FromRgb(16, 185, 129)); // Emerald Green
     }
 
     private void OnMicSelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -102,10 +132,25 @@ public partial class MainWindow : Window
         var settings = SettingsManager.Load();
         settings.DeskMicrophoneName = deskName;
         settings.HeadsetMicrophoneName = headsetName;
+
+        bool isConfigured = !string.IsNullOrEmpty(deskName) && !string.IsNullOrEmpty(headsetName);
+        if (!isConfigured)
+        {
+            settings.AutoSwitchEnabled = false;
+            AutoSwitchToggle.IsChecked = false;
+            AutoSwitchToggle.IsEnabled = false;
+            _autoSwitch.Stop();
+        }
+        else
+        {
+            AutoSwitchToggle.IsEnabled = true;
+        }
+        
         SettingsManager.Save(settings);
 
         // Update active service
         _autoSwitch.UpdateMicrophones(deskName, headsetName);
+        UpdateStatusUI();
         Log.Information("UI Mic Switch configured: Desk={DeskName}, Headset={HeadsetName}", deskName, headsetName);
     }
 

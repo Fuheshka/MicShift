@@ -10,6 +10,7 @@
     <UseWPF>true</UseWPF>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <ApplicationIcon>micshift.ico</ApplicationIcon>
+    <Version>0.3.0</Version>
   </PropertyGroup>
 
   <ItemGroup>
