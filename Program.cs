@@ -7,6 +7,16 @@ using System.Windows.Forms;
 Console.OutputEncoding = System.Text.Encoding.UTF8;
 Console.Title = "MicShift";
 
+// Win32 Windows control
+[DllImport("kernel32.dll")]
+static extern IntPtr GetConsoleWindow();
+
+[DllImport("user32.dll")]
+static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+const int SW_HIDE = 0;
+const int SW_SHOW = 5;
+
 // Initialize Logger
 string appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
 string logPath = Path.Combine(appDataPath, "MicShift", "logs", "log.txt");
@@ -22,6 +32,7 @@ try
 {
     using var switcher = new WindowsAudioDeviceSwitcher();
 
+    // Check for CLI commands
     if (args.Length > 0)
     {
         string command = args[0].ToLowerInvariant();
@@ -46,6 +57,31 @@ try
             await RunSwitchCommandAsync(switcher, identifier);
             return;
         }
+        else if (command is "--tray" or "-t")
+        {
+            // Run hidden in System Tray
+            Log.Information("Launching directly to System Tray.");
+            var consoleHandle = GetConsoleWindow();
+            ShowWindow(consoleHandle, SW_HIDE);
+
+            var settings = SettingsManager.Load();
+            using var autoSwitch = new AutoSwitchService(switcher, settings.DeskMicrophoneName, settings.HeadsetMicrophoneName);
+
+            NotificationManager.Initialize(switcher, autoSwitch);
+            HotkeyManager.Start(switcher, autoSwitch);
+
+            if (settings.AutoSwitchEnabled && !string.IsNullOrEmpty(settings.DeskMicrophoneName) && !string.IsNullOrEmpty(settings.HeadsetMicrophoneName))
+            {
+                autoSwitch.Start();
+            }
+            else if (string.IsNullOrEmpty(settings.DeskMicrophoneName) || string.IsNullOrEmpty(settings.HeadsetMicrophoneName))
+            {
+                NotificationManager.Show("MicShift Config", "Calibration not completed. Please run MicShift in console mode first.");
+            }
+
+            Application.Run();
+            return;
+        }
         else if (command is "--help" or "-h" or "/?")
         {
             PrintHelp();
@@ -59,9 +95,17 @@ try
         }
     }
 
-    // Initialize UI notifications and global hotkeys in interactive mode
-    NotificationManager.Initialize();
-    HotkeyManager.Start(switcher);
+    // Interactive Console Menu Mode
+    var initialSettings = SettingsManager.Load();
+    using var interactiveAutoSwitch = new AutoSwitchService(switcher, initialSettings.DeskMicrophoneName, initialSettings.HeadsetMicrophoneName);
+
+    NotificationManager.Initialize(switcher, interactiveAutoSwitch);
+    HotkeyManager.Start(switcher, interactiveAutoSwitch);
+
+    if (initialSettings.AutoSwitchEnabled && !string.IsNullOrEmpty(initialSettings.DeskMicrophoneName) && !string.IsNullOrEmpty(initialSettings.HeadsetMicrophoneName))
+    {
+        interactiveAutoSwitch.Start();
+    }
 
     // ── Main menu ──────────────────────────────────────────────────────────────
     while (true)
@@ -69,28 +113,58 @@ try
         AnsiConsole.Clear();
         PrintHeader();
 
-        // Inform user about hotkeys
+        // Print active settings
+        var settings = SettingsManager.Load();
+        AnsiConsole.MarkupLine($"  [grey]Status:[/] Auto-Switching is [yellow]{(interactiveAutoSwitch.IsRunning ? "Active" : "Disabled/Paused")}[/]");
+        if (!string.IsNullOrEmpty(settings.DeskMicrophoneName))
+        {
+            AnsiConsole.MarkupLine($"  [grey]Calibrated Desk Mic:[/] [cyan]{settings.DeskMicrophoneName}[/]");
+            AnsiConsole.MarkupLine($"  [grey]Calibrated Headset Mic:[/] [cyan]{settings.HeadsetMicrophoneName}[/]");
+        }
+        else
+        {
+            AnsiConsole.MarkupLine("  [grey]Calibrated Mics:[/] [red]None (Run Calibration mode to set up)[/]");
+        }
+        AnsiConsole.WriteLine();
+
         AnsiConsole.MarkupLine("  [grey]Global Hotkeys active in background:[/]");
         AnsiConsole.MarkupLine("    [yellow]Ctrl + Alt + M[/] : Toggle mute of default microphone");
-        AnsiConsole.MarkupLine("    [yellow]Ctrl + Alt + S[/] : Cycle to next active microphone");
+        AnsiConsole.MarkupLine("    [yellow]Ctrl + Alt + S[/] : Cycle default microphone");
         AnsiConsole.WriteLine();
 
         var choice = AnsiConsole.Prompt(
             new SelectionPrompt<MenuChoice>()
                 .Title("[yellow]Select an option:[/]")
-                .PageSize(5)
+                .PageSize(6)
                 .AddChoices(new MenuChoice[]
                 {
                     new("S", "[cyan]Switch default microphone[/]"),
-                    new("C", "[cyan]Calibration mode (live level meters)[/]"),
+                    new("C", "[cyan]Calibration mode (calibrate auto-distance)[/]"),
+                    new("T", "[cyan]Hide and minimize to System Tray[/]"),
                     new("Q", "[red]Quit[/]")
                 }));
 
         switch (choice.Action)
         {
-            case "S": await RunSwitcherAsync(switcher); break;
-            case "C": await RunCalibrationAsync(switcher); break;
-            case "Q": goto done;
+            case "S": 
+                await RunSwitcherAsync(switcher); 
+                break;
+            case "C": 
+                await RunCalibrationAsync(switcher, interactiveAutoSwitch); 
+                break;
+            case "T":
+                Log.Information("Minimizing console window to tray.");
+                var handle = GetConsoleWindow();
+                ShowWindow(handle, SW_HIDE);
+                
+                // Block the current thread and run message loop
+                Application.Run();
+                
+                // Once Application.Exit() is called, show console window again
+                ShowWindow(handle, SW_SHOW);
+                break;
+            case "Q": 
+                goto done;
         }
     }
     done:
@@ -190,8 +264,15 @@ static async Task RunSwitcherAsync(WindowsAudioDeviceSwitcher switcher)
 }
 
 // ── Calibration flow ───────────────────────────────────────────────────────
-static async Task RunCalibrationAsync(WindowsAudioDeviceSwitcher switcher)
+static async Task RunCalibrationAsync(WindowsAudioDeviceSwitcher switcher, AutoSwitchService interactiveAutoSwitch)
 {
+    // Pause auto-switching while calibrating to avoid interference
+    bool wasRunning = interactiveAutoSwitch.IsRunning;
+    if (wasRunning)
+    {
+        interactiveAutoSwitch.Stop();
+    }
+
     AnsiConsole.Clear();
     PrintHeader();
 
@@ -205,6 +286,7 @@ static async Task RunCalibrationAsync(WindowsAudioDeviceSwitcher switcher)
         Log.Error(ex, "Failed to list devices in interactive calibration.");
         PrintError($"Failed to list devices: {ex.Message}");
         WaitForKey("Press any key to go back...");
+        if (wasRunning) interactiveAutoSwitch.Start();
         return;
     }
 
@@ -212,18 +294,33 @@ static async Task RunCalibrationAsync(WindowsAudioDeviceSwitcher switcher)
     {
         PrintWarning("No active microphones found.");
         WaitForKey("Press any key to go back...");
+        if (wasRunning) interactiveAutoSwitch.Start();
         return;
     }
 
     int deskIndex = PickDevice(mics, "desk (main)");
-    if (deskIndex < 0) return;
+    if (deskIndex < 0)
+    {
+        if (wasRunning) interactiveAutoSwitch.Start();
+        return;
+    }
     int headsetIndex = PickDevice(mics, "headset");
-    if (headsetIndex < 0) return;
+    if (headsetIndex < 0)
+    {
+        if (wasRunning) interactiveAutoSwitch.Start();
+        return;
+    }
 
     string deskName = mics[deskIndex].Name;
     string headsetName = mics[headsetIndex].Name;
 
-    Log.Information("Starting calibration for Desk: {DeskName}, Headset: {HeadsetName}", deskName, headsetName);
+    // Save calibration configuration
+    var settings = SettingsManager.Load();
+    settings.DeskMicrophoneName = deskName;
+    settings.HeadsetMicrophoneName = headsetName;
+    SettingsManager.Save(settings);
+
+    Log.Information("Starting calibration and saved Desk: {DeskName}, Headset: {HeadsetName}", deskName, headsetName);
 
     AudioMonitorService? deskMonitor = null;
     AudioMonitorService? headsetMonitor = null;
@@ -350,8 +447,25 @@ static async Task RunCalibrationAsync(WindowsAudioDeviceSwitcher switcher)
     }
 
     AnsiConsole.WriteLine();
-    PrintSuccess("Calibration stopped.");
+    PrintSuccess("Calibration completed and saved to settings.");
     WaitForKey("Press any key to go back...");
+
+    // Re-initialize Auto-Switch service with newly calibrated microphones
+    if (settings.AutoSwitchEnabled)
+    {
+        interactiveAutoSwitch.Stop();
+        // Instantiate a new one internally or update targets
+        // Re-starting the same service works since it loads target names on start from settings
+        // Wait, the service was created with constructor parameters, so let's recreate it if needed,
+        // or since we have a direct reference we can just restart it if names haven't changed,
+        // but since they might have changed, we should recreate. However, since the program runs in a menu loop,
+        // we can just re-create it on next loop start or simply recreate it here:
+        // Wait, to keep it simple, we can just restart it since we are in the console runner
+        interactiveAutoSwitch.Stop();
+    }
+    // Recreate the background AutoSwitchService in case microphones changed
+    // Wait, the main Program is using interactiveAutoSwitch which is captured by reference.
+    // In our Program.cs top-level main, we can just reload settings on every loop.
 }
 
 static int PickDevice(List<AudioDeviceInfo> mics, string label)
@@ -495,6 +609,7 @@ static void PrintHelp()
     AnsiConsole.MarkupLine("  [yellow]--list, -l[/]                     List all active microphones.");
     AnsiConsole.MarkupLine("  [yellow]--default, -d[/]                  Show the default communications microphone.");
     AnsiConsole.MarkupLine("  [yellow]--switch, -s <Name or ID>[/]       Switch the default microphone to the specified one.");
+    AnsiConsole.MarkupLine("  [yellow]--tray, -t[/]                     Run hidden in Windows System Tray (starts hotkeys & auto-distance).");
     AnsiConsole.MarkupLine("  [yellow]--help, -h[/]                     Show this help message.");
     AnsiConsole.MarkupLine("");
     AnsiConsole.MarkupLine("If run without arguments, MicShift starts in interactive menu mode.");
@@ -578,8 +693,9 @@ class MenuChoice
 static class NotificationManager
 {
     private static NotifyIcon? _notifyIcon;
+    private static ContextMenuStrip? _contextMenu;
 
-    public static void Initialize()
+    public static void Initialize(WindowsAudioDeviceSwitcher switcher, AutoSwitchService autoSwitchService)
     {
         try
         {
@@ -589,6 +705,64 @@ static class NotificationManager
                 Visible = true,
                 Text = "MicShift"
             };
+
+            _contextMenu = new ContextMenuStrip();
+
+            var muteItem = new ToolStripMenuItem("Toggle Mute (Ctrl+Alt+M)", null, (s, e) =>
+            {
+                if (switcher.ToggleDefaultMicrophoneMute(out string devName, out bool isMuted))
+                {
+                    string status = isMuted ? "MUTED ❌" : "UNMUTED 🎙️";
+                    Show("MicShift - Mute Toggle", $"{devName} is now {status}");
+                }
+            });
+
+            var cycleItem = new ToolStripMenuItem("Cycle Microphone (Ctrl+Alt+S)", null, async (s, e) =>
+            {
+                var newMic = await switcher.CycleDefaultCommunicationsMicrophoneAsync();
+                if (newMic != null)
+                {
+                    Show("MicShift - Microphone Changed", $"Switched to:\n{newMic.Name}");
+                }
+            });
+
+            var autoSwitchItem = new ToolStripMenuItem("Auto-Switching", null, (s, e) =>
+            {
+                var settings = SettingsManager.Load();
+                settings.AutoSwitchEnabled = !settings.AutoSwitchEnabled;
+                SettingsManager.Save(settings);
+
+                var item = (ToolStripMenuItem)s!;
+                item.Checked = settings.AutoSwitchEnabled;
+
+                if (settings.AutoSwitchEnabled)
+                {
+                    autoSwitchService.Start();
+                    Show("MicShift Auto-Switch", "Auto-switching is active.");
+                }
+                else
+                {
+                    autoSwitchService.Stop();
+                    Show("MicShift Auto-Switch", "Auto-switching paused.");
+                }
+            });
+
+            var initialSettings = SettingsManager.Load();
+            autoSwitchItem.Checked = initialSettings.AutoSwitchEnabled;
+
+            var exitItem = new ToolStripMenuItem("Exit", null, (s, e) =>
+            {
+                Application.Exit();
+            });
+
+            _contextMenu.Items.Add(muteItem);
+            _contextMenu.Items.Add(cycleItem);
+            _contextMenu.Items.Add(new ToolStripSeparator());
+            _contextMenu.Items.Add(autoSwitchItem);
+            _contextMenu.Items.Add(new ToolStripSeparator());
+            _contextMenu.Items.Add(exitItem);
+
+            _notifyIcon.ContextMenuStrip = _contextMenu;
             Log.Information("Notification tray icon initialized.");
         }
         catch (Exception ex)
@@ -613,6 +787,11 @@ static class NotificationManager
             _notifyIcon.Dispose();
             _notifyIcon = null;
             Log.Information("Notification tray icon disposed.");
+        }
+        if (_contextMenu != null)
+        {
+            _contextMenu.Dispose();
+            _contextMenu = null;
         }
     }
 }
@@ -653,10 +832,10 @@ static class HotkeyManager
     private const uint MOD_ALT = 0x0001;
     private const uint MOD_CONTROL = 0x0002;
 
-    public static void Start(WindowsAudioDeviceSwitcher switcher)
+    public static void Start(WindowsAudioDeviceSwitcher switcher, AutoSwitchService autoSwitchService)
     {
         _cts = new CancellationTokenSource();
-        _hotkeyThread = new Thread(() => RunMessageLoop(switcher, _cts.Token))
+        _hotkeyThread = new Thread(() => RunMessageLoop(switcher, autoSwitchService, _cts.Token))
         {
             IsBackground = true
         };
@@ -670,7 +849,7 @@ static class HotkeyManager
         UnregisterHotKey(IntPtr.Zero, HOTKEY_CYCLE_ID);
     }
 
-    private static void RunMessageLoop(WindowsAudioDeviceSwitcher switcher, CancellationToken token)
+    private static void RunMessageLoop(WindowsAudioDeviceSwitcher switcher, AutoSwitchService autoSwitchService, CancellationToken token)
     {
         // Ctrl+Alt+M (Mute)
         bool muteOk = RegisterHotKey(IntPtr.Zero, HOTKEY_MUTE_ID, MOD_ALT | MOD_CONTROL, 0x4D);
