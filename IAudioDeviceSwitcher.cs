@@ -24,4 +24,18 @@ public interface IAudioDeviceSwitcher
     /// found or the OS rejected the request.
     /// </returns>
     Task<bool> SetDefaultCommunicationsMicrophoneAsync(Guid deviceId);
+
+    /// <summary>
+    /// Toggles the mute state of the current default communications microphone.
+    /// </summary>
+    /// <param name="deviceName">Returns the friendly name of the toggled device.</param>
+    /// <param name="isMuted">Returns the new mute state (true if muted, false if unmuted).</param>
+    /// <returns>true if the toggle was successful; false if no default communications device exists.</returns>
+    bool ToggleDefaultMicrophoneMute(out string deviceName, out bool isMuted);
+
+    /// <summary>
+    /// Cycles the default communications microphone to the next active microphone in the list.
+    /// </summary>
+    /// <returns>The new default microphone info, or null if cycle was not possible.</returns>
+    Task<AudioDeviceInfo?> CycleDefaultCommunicationsMicrophoneAsync();
 }

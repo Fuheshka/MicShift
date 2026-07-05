@@ -66,6 +66,75 @@ public sealed class WindowsAudioDeviceSwitcher : IAudioDeviceSwitcher, IDisposab
         }
     }
 
+    /// <inheritdoc/>
+    public bool ToggleDefaultMicrophoneMute(out string deviceName, out bool isMuted)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        CoreAudioDevice? dev;
+        try
+        {
+            dev = _controller
+                .GetCaptureDevices(DeviceState.Active)
+                .FirstOrDefault(d => d.IsDefaultCommunicationsDevice);
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException("Failed to query default capture communications device.", ex);
+        }
+
+        if (dev != null)
+        {
+            deviceName = dev.FullName;
+            isMuted = !dev.IsMuted;
+            try
+            {
+                dev.Mute(isMuted);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException($"Failed to mute/unmute device \"{dev.FullName}\".", ex);
+            }
+        }
+
+        deviceName = string.Empty;
+        isMuted = false;
+        return false;
+    }
+
+    /// <inheritdoc/>
+    public async Task<AudioDeviceInfo?> CycleDefaultCommunicationsMicrophoneAsync()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        var mics = GetActiveMicrophones();
+        if (mics.Count <= 1)
+            return null;
+
+        int currentIndex = -1;
+        for (int i = 0; i < mics.Count; i++)
+        {
+            if (mics[i].IsDefaultCommunications)
+            {
+                currentIndex = i;
+                break;
+            }
+        }
+        if (currentIndex < 0)
+            currentIndex = 0;
+
+        int nextIndex = (currentIndex + 1) % mics.Count;
+        var nextDevice = mics[nextIndex];
+
+        bool success = await SetDefaultCommunicationsMicrophoneAsync(nextDevice.Id);
+        if (success)
+        {
+            return nextDevice with { IsDefaultCommunications = true };
+        }
+        return null;
+    }
+
     public void Dispose()
     {
         if (_disposed) return;
