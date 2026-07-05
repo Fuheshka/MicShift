@@ -1,4 +1,5 @@
-﻿using MicShift;
+using MicShift;
+using Spectre.Console;
 
 Console.OutputEncoding = System.Text.Encoding.UTF8;
 Console.Title = "MicShift";
@@ -8,31 +9,30 @@ using var switcher = new WindowsAudioDeviceSwitcher();
 // ── Main menu ──────────────────────────────────────────────────────────────
 while (true)
 {
-    Console.Clear();
+    AnsiConsole.Clear();
     PrintHeader();
 
-    Console.WriteLine("  [S] Switch default microphone");
-    Console.WriteLine("  [C] Calibration mode (live level meters)");
-    Console.WriteLine("  [Q] Quit");
-    Console.WriteLine();
-    Console.Write("  Choose: ");
+    var choice = AnsiConsole.Prompt(
+        new SelectionPrompt<MenuChoice>()
+            .Title("[yellow]Select an option:[/]")
+            .PageSize(5)
+            .AddChoices(new MenuChoice[]
+            {
+                new("S", "[cyan]Switch default microphone[/]"),
+                new("C", "[cyan]Calibration mode (live level meters)[/]"),
+                new("Q", "[red]Quit[/]")
+            }));
 
-    string? menuInput = Console.ReadLine()?.Trim().ToUpperInvariant();
-
-    switch (menuInput)
+    switch (choice.Action)
     {
         case "S": await RunSwitcherAsync(switcher); break;
         case "C": await RunCalibrationAsync(switcher); break;
         case "Q": goto done;
-        default:
-            PrintWarning("Unknown option.");
-            WaitForKey("Press any key to continue...");
-            break;
     }
 }
 done:
-Console.Clear();
-Console.WriteLine("Goodbye.");
+AnsiConsole.Clear();
+AnsiConsole.MarkupLine("[yellow]Goodbye.[/]");
 return;
 
 // ── Switcher flow ──────────────────────────────────────────────────────────
@@ -40,7 +40,7 @@ static async Task RunSwitcherAsync(WindowsAudioDeviceSwitcher switcher)
 {
     while (true)
     {
-        Console.Clear();
+        AnsiConsole.Clear();
         PrintHeader();
 
         List<AudioDeviceInfo> mics;
@@ -62,39 +62,19 @@ static async Task RunSwitcherAsync(WindowsAudioDeviceSwitcher switcher)
             return;
         }
 
-        Console.WriteLine("  Active microphones:\n");
-        for (int i = 0; i < mics.Count; i++)
-        {
-            AudioDeviceInfo mic = mics[i];
-            if (mic.IsDefaultCommunications)
-            {
-                Console.ForegroundColor = ConsoleColor.Green;
-                Console.WriteLine($"  [{i + 1}] {mic.Name}  <-- DEFAULT");
-                Console.ResetColor();
-            }
-            else
-            {
-                Console.WriteLine($"  [{i + 1}] {mic.Name}");
-            }
-        }
+        var choices = mics.Select(m => new MicChoice(m)).ToList();
+        choices.Add(new MicChoice("Go Back"));
 
-        Console.WriteLine();
-        Console.WriteLine("  Enter the number to set as default,");
-        Console.Write("  or [B] to go back: ");
+        var selectedChoice = AnsiConsole.Prompt(
+            new SelectionPrompt<MicChoice>()
+                .Title("Select microphone to set as default:")
+                .PageSize(10)
+                .AddChoices(choices));
 
-        string? input = Console.ReadLine()?.Trim();
-
-        if (string.Equals(input, "b", StringComparison.OrdinalIgnoreCase))
+        if (selectedChoice.IsGoBack)
             return;
 
-        if (!int.TryParse(input, out int choice) || choice < 1 || choice > mics.Count)
-        {
-            PrintWarning("Invalid selection.");
-            WaitForKey("Press any key to try again...");
-            continue;
-        }
-
-        AudioDeviceInfo selected = mics[choice - 1];
+        AudioDeviceInfo selected = selectedChoice.Device!;
 
         if (selected.IsDefaultCommunications)
         {
@@ -103,13 +83,11 @@ static async Task RunSwitcherAsync(WindowsAudioDeviceSwitcher switcher)
             continue;
         }
 
-        Console.WriteLine();
-        Console.Write($"  Switching to \"{selected.Name}\"...");
+        AnsiConsole.MarkupLine($"\n  Switching to \"[cyan]{selected.Name}[/]\"...");
 
         try
         {
             bool success = await switcher.SetDefaultCommunicationsMicrophoneAsync(selected.Id);
-            Console.WriteLine();
             if (success)
                 PrintSuccess($"Set \"{selected.Name}\" as Default + Communications default.");
             else
@@ -117,7 +95,6 @@ static async Task RunSwitcherAsync(WindowsAudioDeviceSwitcher switcher)
         }
         catch (Exception ex)
         {
-            Console.WriteLine();
             PrintError($"Error: {ex.Message}");
         }
 
@@ -128,7 +105,7 @@ static async Task RunSwitcherAsync(WindowsAudioDeviceSwitcher switcher)
 // ── Calibration flow ───────────────────────────────────────────────────────
 static async Task RunCalibrationAsync(WindowsAudioDeviceSwitcher switcher)
 {
-    Console.Clear();
+    AnsiConsole.Clear();
     PrintHeader();
 
     List<AudioDeviceInfo> mics;
@@ -150,25 +127,22 @@ static async Task RunCalibrationAsync(WindowsAudioDeviceSwitcher switcher)
         return;
     }
 
-    Console.WriteLine("  Available microphones:\n");
-    for (int i = 0; i < mics.Count; i++)
-        Console.WriteLine($"  [{i + 1}] {mics[i].Name}");
-
-    Console.WriteLine();
-
-    int deskIndex   = PickDevice(mics, "desk (main)");
+    int deskIndex = PickDevice(mics, "desk (main)");
+    if (deskIndex < 0) return;
     int headsetIndex = PickDevice(mics, "headset");
+    if (headsetIndex < 0) return;
 
-    if (deskIndex < 0 || headsetIndex < 0) return;
+    string deskName = mics[deskIndex].Name;
+    string headsetName = mics[headsetIndex].Name;
 
-    AudioMonitorService? deskMonitor   = null;
+    AudioMonitorService? deskMonitor = null;
     AudioMonitorService? headsetMonitor = null;
 
     try
     {
         try
         {
-            deskMonitor = new AudioMonitorService(mics[deskIndex].Name);
+            deskMonitor = new AudioMonitorService(deskName);
         }
         catch (ArgumentException ex)
         {
@@ -179,7 +153,7 @@ static async Task RunCalibrationAsync(WindowsAudioDeviceSwitcher switcher)
 
         try
         {
-            headsetMonitor = new AudioMonitorService(mics[headsetIndex].Name);
+            headsetMonitor = new AudioMonitorService(headsetName);
         }
         catch (ArgumentException ex)
         {
@@ -189,16 +163,9 @@ static async Task RunCalibrationAsync(WindowsAudioDeviceSwitcher switcher)
         }
 
         Console.CursorVisible = false;
-        Console.Clear();
+        AnsiConsole.Clear();
         PrintHeader();
-        Console.WriteLine("  Live level meters  —  press [Q] to stop\n");
-
-        // Reserve rows for the two meters.
-        int deskRow    = Console.CursorTop;
-        Console.WriteLine();
-        int headsetRow = Console.CursorTop;
-        Console.WriteLine();
-        Console.WriteLine();
+        AnsiConsole.MarkupLine("  Live level meters  —  press [red][[Q]][/] to stop\n");
 
         using var cts = new CancellationTokenSource();
 
@@ -212,15 +179,62 @@ static async Task RunCalibrationAsync(WindowsAudioDeviceSwitcher switcher)
             }
         });
 
-        // Render loop at ~30 fps.
-        while (!cts.Token.IsCancellationRequested)
-        {
-            DrawMeter(deskRow,    $"  Desk    [{mics[deskIndex].Name[..Math.Min(mics[deskIndex].Name.Length, 22)],   -22}]", deskMonitor.CurrentPeakLevel);
-            DrawMeter(headsetRow, $"  Headset [{mics[headsetIndex].Name[..Math.Min(mics[headsetIndex].Name.Length, 22)], -22}]", headsetMonitor.CurrentPeakLevel);
+        int loopCount = 0;
+        
+        var liveTable = new Table()
+            .Border(TableBorder.Rounded)
+            .Title("[yellow]Live Level Meters[/]")
+            .AddColumn("Device")
+            .AddColumn("Signal Level")
+            .AddColumn("Peak %");
 
-            try { await Task.Delay(33, cts.Token); }
-            catch (TaskCanceledException) { break; }
-        }
+        await AnsiConsole.Live(liveTable)
+            .StartAsync(async ctx =>
+            {
+                while (!cts.Token.IsCancellationRequested)
+                {
+                    // Hot-plug check: verify devices are still active
+                    loopCount++;
+                    if (loopCount % 30 == 0) // approx every 1 second
+                    {
+                        var activeMics = switcher.GetActiveMicrophones();
+                        if (!activeMics.Any(m => m.Name == deskName))
+                            throw new InvalidOperationException($"Desk microphone \"{deskName}\" was unplugged.");
+                        if (!activeMics.Any(m => m.Name == headsetName))
+                            throw new InvalidOperationException($"Headset microphone \"{headsetName}\" was unplugged.");
+                    }
+
+                    // Check for internal NAudio capture exceptions
+                    if (deskMonitor.LastException != null)
+                        throw new InvalidOperationException($"Desk microphone error: {deskMonitor.LastException.Message}");
+                    if (headsetMonitor.LastException != null)
+                        throw new InvalidOperationException($"Headset microphone error: {headsetMonitor.LastException.Message}");
+
+                    float deskLevel = deskMonitor.CurrentPeakLevel;
+                    float headsetLevel = headsetMonitor.CurrentPeakLevel;
+
+                    var updateTable = new Table()
+                        .Border(TableBorder.Rounded)
+                        .Title("[yellow]Live Level Meters[/]")
+                        .AddColumn("Device")
+                        .AddColumn("Signal Level")
+                        .AddColumn("Peak %");
+
+                    updateTable.AddRow($"Desk ({deskName})", GetMeterMarkup(deskLevel), $"{deskLevel * 100,5:F1}%");
+                    updateTable.AddRow($"Headset ({headsetName})", GetMeterMarkup(headsetLevel), $"{headsetLevel * 100,5:F1}%");
+
+                    ctx.UpdateTarget(updateTable);
+                    ctx.Refresh();
+                    
+                    try { await Task.Delay(33, cts.Token); }
+                    catch (TaskCanceledException) { break; }
+                }
+            });
+    }
+    catch (Exception ex)
+    {
+        AnsiConsole.WriteLine();
+        PrintError($"Error during calibration: {ex.Message}");
     }
     finally
     {
@@ -229,94 +243,116 @@ static async Task RunCalibrationAsync(WindowsAudioDeviceSwitcher switcher)
         headsetMonitor?.Dispose();
     }
 
-    Console.WriteLine();
+    AnsiConsole.WriteLine();
     PrintSuccess("Calibration stopped.");
     WaitForKey("Press any key to go back...");
 }
 
 static int PickDevice(List<AudioDeviceInfo> mics, string label)
 {
-    while (true)
-    {
-        Console.Write($"  Enter number for the {label} mic (or [B] to cancel): ");
-        string? input = Console.ReadLine()?.Trim();
+    var choices = mics.Select(m => new MicChoice(m)).ToList();
+    choices.Add(new MicChoice("Cancel"));
 
-        if (string.Equals(input, "b", StringComparison.OrdinalIgnoreCase))
-            return -1;
+    var selected = AnsiConsole.Prompt(
+        new SelectionPrompt<MicChoice>()
+            .Title($"Select the [yellow]{label}[/] microphone:")
+            .PageSize(10)
+            .AddChoices(choices));
 
-        if (int.TryParse(input, out int idx) && idx >= 1 && idx <= mics.Count)
-            return idx - 1;
+    if (selected.IsGoBack)
+        return -1;
 
-        PrintWarning("  Invalid selection, try again.");
-    }
+    return mics.FindIndex(m => m.Id == selected.Device!.Id);
 }
 
-static void DrawMeter(int row, string label, float level)
+static string GetMeterMarkup(float level)
 {
     const int barWidth = 40;
     int filled = (int)(level * barWidth);
     filled = Math.Clamp(filled, 0, barWidth);
 
-    string bar = new string('█', filled) + new string('░', barWidth - filled);
-
-    // Colour: green < 70%, yellow < 90%, red >= 90%
-    ConsoleColor color = level switch
+    string colorTag = level switch
     {
-        >= 0.9f => ConsoleColor.Red,
-        >= 0.7f => ConsoleColor.Yellow,
-        _       => ConsoleColor.Green
+        >= 0.9f => "red",
+        >= 0.7f => "yellow",
+        _       => "green"
     };
 
-    int savedTop  = Console.CursorTop;
-    int savedLeft = Console.CursorLeft;
+    string filledBar = new string('█', filled);
+    string emptyBar = new string('░', barWidth - filled);
 
-    Console.SetCursorPosition(0, row);
-    Console.Write(label + " ");
-    Console.ForegroundColor = color;
-    Console.Write($"[{bar}]");
-    Console.ResetColor();
-    Console.Write($" {level * 100,5:F1}%  ");
-
-    Console.SetCursorPosition(savedLeft, savedTop);
+    return $"[{colorTag}]{filledBar}[/][grey]{emptyBar}[/]";
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 static void PrintHeader()
 {
-    Console.ForegroundColor = ConsoleColor.Cyan;
-    Console.WriteLine("  ╔══════════════════════╗");
-    Console.WriteLine("  ║       MicShift       ║");
-    Console.WriteLine("  ╚══════════════════════╝");
-    Console.ResetColor();
-    Console.WriteLine();
+    AnsiConsole.Write(
+        new Spectre.Console.Panel(new Text("MicShift - Audio Device Controller", new Style(Spectre.Console.Color.Cyan1, decoration: Decoration.Bold)))
+            .Border(BoxBorder.Double)
+            .BorderColor(Spectre.Console.Color.Cyan1)
+            .Padding(1, 0, 1, 0));
+    AnsiConsole.WriteLine();
 }
 
 static void PrintSuccess(string message)
 {
-    Console.ForegroundColor = ConsoleColor.Green;
-    Console.WriteLine($"  ✔ {message}");
-    Console.ResetColor();
+    AnsiConsole.MarkupLine($"  [green]✔ {message}[/]");
 }
 
 static void PrintWarning(string message)
 {
-    Console.ForegroundColor = ConsoleColor.Yellow;
-    Console.WriteLine($"  ⚠ {message}");
-    Console.ResetColor();
+    AnsiConsole.MarkupLine($"  [yellow]⚠ {message}[/]");
 }
 
 static void PrintError(string message)
 {
-    Console.ForegroundColor = ConsoleColor.Red;
-    Console.WriteLine($"  ✘ {message}");
-    Console.ResetColor();
+    AnsiConsole.MarkupLine($"  [red]✘ {message}[/]");
 }
 
 static void WaitForKey(string prompt)
 {
-    Console.ForegroundColor = ConsoleColor.DarkGray;
-    Console.WriteLine(prompt);
-    Console.ResetColor();
+    AnsiConsole.MarkupLine($"  [grey]{prompt}[/]");
     Console.ReadKey(intercept: true);
+}
+
+// ── Helper Choices ─────────────────────────────────────────────────────────
+
+class MicChoice
+{
+    public AudioDeviceInfo? Device { get; }
+    public bool IsGoBack { get; }
+    private readonly string _display;
+
+    public MicChoice(AudioDeviceInfo device)
+    {
+        Device = device;
+        IsGoBack = false;
+        _display = device.IsDefaultCommunications 
+            ? $"[green]✔ {device.Name} (Default)[/]" 
+            : $"  {device.Name}";
+    }
+
+    public MicChoice(string label)
+    {
+        IsGoBack = true;
+        _display = $"[yellow]<-- {label}[/]";
+    }
+
+    public override string ToString() => _display;
+}
+
+class MenuChoice
+{
+    public string Action { get; }
+    private readonly string _display;
+
+    public MenuChoice(string action, string display)
+    {
+        Action = action;
+        _display = display;
+    }
+
+    public override string ToString() => _display;
 }

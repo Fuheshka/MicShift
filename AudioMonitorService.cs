@@ -10,6 +10,7 @@ public sealed class AudioMonitorService : IDisposable
 {
     private readonly WaveInEvent _waveIn;
     private volatile float _currentPeakLevel;
+    private volatile Exception? _lastException;
     private bool _disposed;
 
     /// <summary>The friendly name of the device being monitored.</summary>
@@ -17,6 +18,9 @@ public sealed class AudioMonitorService : IDisposable
 
     /// <summary>Current peak amplitude in the last audio buffer (0.0 – 1.0).</summary>
     public float CurrentPeakLevel => _currentPeakLevel;
+
+    /// <summary>Any exception thrown by the underlying capture device (e.g. if disconnected).</summary>
+    public Exception? LastException => _lastException;
 
     /// <param name="deviceFriendlyName">
     /// The friendly name of the capture device (as returned by
@@ -38,6 +42,13 @@ public sealed class AudioMonitorService : IDisposable
         };
 
         _waveIn.DataAvailable += OnDataAvailable;
+        _waveIn.RecordingStopped += (sender, args) =>
+        {
+            if (args.Exception != null)
+            {
+                _lastException = args.Exception;
+            }
+        };
         _waveIn.StartRecording();
     }
 

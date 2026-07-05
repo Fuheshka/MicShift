@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -14,6 +14,7 @@
     <!-- AudioSwitcher targets .NET Framework but works via compatibility shim on .NET 10 -->
     <PackageReference Include="AudioSwitcher.AudioApi.CoreAudio" Version="3.0.3" NoWarn="NU1701" />
     <PackageReference Include="NAudio" Version="2.3.0" />
+    <PackageReference Include="Spectre.Console" Version="0.49.1" />
   </ItemGroup>
 
 </Project>
