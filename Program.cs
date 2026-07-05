@@ -1,38 +1,101 @@
 using MicShift;
 using Spectre.Console;
+using Serilog;
 
 Console.OutputEncoding = System.Text.Encoding.UTF8;
 Console.Title = "MicShift";
 
-using var switcher = new WindowsAudioDeviceSwitcher();
+// Initialize Logger
+string appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+string logPath = Path.Combine(appDataPath, "MicShift", "logs", "log.txt");
 
-// ── Main menu ──────────────────────────────────────────────────────────────
-while (true)
+Log.Logger = new LoggerConfiguration()
+    .MinimumLevel.Debug()
+    .WriteTo.File(logPath, rollingInterval: RollingInterval.Day, outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {Message:lj}{NewLine}{Exception}")
+    .CreateLogger();
+
+Log.Information("MicShift started.");
+
+try
 {
-    AnsiConsole.Clear();
-    PrintHeader();
+    using var switcher = new WindowsAudioDeviceSwitcher();
 
-    var choice = AnsiConsole.Prompt(
-        new SelectionPrompt<MenuChoice>()
-            .Title("[yellow]Select an option:[/]")
-            .PageSize(5)
-            .AddChoices(new MenuChoice[]
-            {
-                new("S", "[cyan]Switch default microphone[/]"),
-                new("C", "[cyan]Calibration mode (live level meters)[/]"),
-                new("Q", "[red]Quit[/]")
-            }));
-
-    switch (choice.Action)
+    if (args.Length > 0)
     {
-        case "S": await RunSwitcherAsync(switcher); break;
-        case "C": await RunCalibrationAsync(switcher); break;
-        case "Q": goto done;
+        string command = args[0].ToLowerInvariant();
+        if (command is "--list" or "-l")
+        {
+            RunListCommand(switcher);
+            return;
+        }
+        else if (command is "--default" or "-d")
+        {
+            RunDefaultCommand(switcher);
+            return;
+        }
+        else if (command is "--switch" or "-s")
+        {
+            if (args.Length < 2)
+            {
+                AnsiConsole.MarkupLine("[red]Error:[/] Please specify microphone name or ID.");
+                return;
+            }
+            string identifier = string.Join(" ", args.Skip(1));
+            await RunSwitchCommandAsync(switcher, identifier);
+            return;
+        }
+        else if (command is "--help" or "-h" or "/?")
+        {
+            PrintHelp();
+            return;
+        }
+        else
+        {
+            AnsiConsole.MarkupLine($"[red]Error:[/] Unknown argument: {args[0]}");
+            PrintHelp();
+            return;
+        }
     }
+
+    // ── Main menu ──────────────────────────────────────────────────────────────
+    while (true)
+    {
+        AnsiConsole.Clear();
+        PrintHeader();
+
+        var choice = AnsiConsole.Prompt(
+            new SelectionPrompt<MenuChoice>()
+                .Title("[yellow]Select an option:[/]")
+                .PageSize(5)
+                .AddChoices(new MenuChoice[]
+                {
+                    new("S", "[cyan]Switch default microphone[/]"),
+                    new("C", "[cyan]Calibration mode (live level meters)[/]"),
+                    new("Q", "[red]Quit[/]")
+                }));
+
+        switch (choice.Action)
+        {
+            case "S": await RunSwitcherAsync(switcher); break;
+            case "C": await RunCalibrationAsync(switcher); break;
+            case "Q": goto done;
+        }
+    }
+    done:
+    AnsiConsole.Clear();
+    AnsiConsole.MarkupLine("[yellow]Goodbye.[/]");
 }
-done:
-AnsiConsole.Clear();
-AnsiConsole.MarkupLine("[yellow]Goodbye.[/]");
+catch (Exception ex)
+{
+    Log.Fatal(ex, "Unhandled exception occurred.");
+    AnsiConsole.WriteException(ex);
+}
+finally
+{
+    Log.Information("MicShift exiting.");
+    Log.CloseAndFlush();
+}
+
 return;
 
 // ── Switcher flow ──────────────────────────────────────────────────────────
@@ -50,6 +113,7 @@ static async Task RunSwitcherAsync(WindowsAudioDeviceSwitcher switcher)
         }
         catch (Exception ex)
         {
+            Log.Error(ex, "Failed to list devices in interactive switcher.");
             PrintError($"Failed to list devices: {ex.Message}");
             WaitForKey("Press any key to retry...");
             continue;
@@ -57,6 +121,7 @@ static async Task RunSwitcherAsync(WindowsAudioDeviceSwitcher switcher)
 
         if (mics.Count == 0)
         {
+            Log.Warning("No active microphones found during list query.");
             PrintWarning("No active microphones found.");
             WaitForKey("Press any key to go back...");
             return;
@@ -89,12 +154,19 @@ static async Task RunSwitcherAsync(WindowsAudioDeviceSwitcher switcher)
         {
             bool success = await switcher.SetDefaultCommunicationsMicrophoneAsync(selected.Id);
             if (success)
+            {
+                Log.Information("Successfully set default communications microphone to {DeviceName} ({DeviceId})", selected.Name, selected.Id);
                 PrintSuccess($"Set \"{selected.Name}\" as Default + Communications default.");
+            }
             else
+            {
+                Log.Warning("Failed to switch default communications microphone to {DeviceName}", selected.Name);
                 PrintWarning($"Could not switch to \"{selected.Name}\".");
+            }
         }
         catch (Exception ex)
         {
+            Log.Error(ex, "Error occurred while setting microphone {DeviceName}", selected.Name);
             PrintError($"Error: {ex.Message}");
         }
 
@@ -115,6 +187,7 @@ static async Task RunCalibrationAsync(WindowsAudioDeviceSwitcher switcher)
     }
     catch (Exception ex)
     {
+        Log.Error(ex, "Failed to list devices in interactive calibration.");
         PrintError($"Failed to list devices: {ex.Message}");
         WaitForKey("Press any key to go back...");
         return;
@@ -135,6 +208,8 @@ static async Task RunCalibrationAsync(WindowsAudioDeviceSwitcher switcher)
     string deskName = mics[deskIndex].Name;
     string headsetName = mics[headsetIndex].Name;
 
+    Log.Information("Starting calibration for Desk: {DeskName}, Headset: {HeadsetName}", deskName, headsetName);
+
     AudioMonitorService? deskMonitor = null;
     AudioMonitorService? headsetMonitor = null;
 
@@ -146,6 +221,7 @@ static async Task RunCalibrationAsync(WindowsAudioDeviceSwitcher switcher)
         }
         catch (ArgumentException ex)
         {
+            Log.Error(ex, "Could not start audio monitor for Desk microphone {DeviceName}", deskName);
             PrintError($"Could not start monitor for desk mic: {ex.Message}");
             WaitForKey("Press any key to go back...");
             return;
@@ -157,6 +233,7 @@ static async Task RunCalibrationAsync(WindowsAudioDeviceSwitcher switcher)
         }
         catch (ArgumentException ex)
         {
+            Log.Error(ex, "Could not start audio monitor for Headset microphone {DeviceName}", headsetName);
             PrintError($"Could not start monitor for headset mic: {ex.Message}");
             WaitForKey("Press any key to go back...");
             return;
@@ -199,16 +276,28 @@ static async Task RunCalibrationAsync(WindowsAudioDeviceSwitcher switcher)
                     {
                         var activeMics = switcher.GetActiveMicrophones();
                         if (!activeMics.Any(m => m.Name == deskName))
+                        {
+                            Log.Warning("Desk mic {DeskName} disconnected during calibration.", deskName);
                             throw new InvalidOperationException($"Desk microphone \"{deskName}\" was unplugged.");
+                        }
                         if (!activeMics.Any(m => m.Name == headsetName))
+                        {
+                            Log.Warning("Headset mic {HeadsetName} disconnected during calibration.", headsetName);
                             throw new InvalidOperationException($"Headset microphone \"{headsetName}\" was unplugged.");
+                        }
                     }
 
                     // Check for internal NAudio capture exceptions
                     if (deskMonitor.LastException != null)
+                    {
+                        Log.Error(deskMonitor.LastException, "Desk mic capture exception during calibration.");
                         throw new InvalidOperationException($"Desk microphone error: {deskMonitor.LastException.Message}");
+                    }
                     if (headsetMonitor.LastException != null)
+                    {
+                        Log.Error(headsetMonitor.LastException, "Headset mic capture exception during calibration.");
                         throw new InvalidOperationException($"Headset microphone error: {headsetMonitor.LastException.Message}");
+                    }
 
                     float deskLevel = deskMonitor.CurrentPeakLevel;
                     float headsetLevel = headsetMonitor.CurrentPeakLevel;
@@ -233,6 +322,7 @@ static async Task RunCalibrationAsync(WindowsAudioDeviceSwitcher switcher)
     }
     catch (Exception ex)
     {
+        Log.Error(ex, "Exception occurred during active calibration stream.");
         AnsiConsole.WriteLine();
         PrintError($"Error during calibration: {ex.Message}");
     }
@@ -241,6 +331,7 @@ static async Task RunCalibrationAsync(WindowsAudioDeviceSwitcher switcher)
         Console.CursorVisible = true;
         deskMonitor?.Dispose();
         headsetMonitor?.Dispose();
+        Log.Information("Calibration stopped.");
     }
 
     AnsiConsole.WriteLine();
@@ -282,6 +373,116 @@ static string GetMeterMarkup(float level)
     string emptyBar = new string('░', barWidth - filled);
 
     return $"[{colorTag}]{filledBar}[/][grey]{emptyBar}[/]";
+}
+
+// ── CLI Command Handlers ───────────────────────────────────────────────────
+
+static void RunListCommand(WindowsAudioDeviceSwitcher switcher)
+{
+    try
+    {
+        Log.Information("Running CLI List command.");
+        var mics = switcher.GetActiveMicrophones();
+        if (mics.Count == 0)
+        {
+            Console.WriteLine("No active microphones found.");
+            return;
+        }
+        foreach (var mic in mics)
+        {
+            string defaultMarker = mic.IsDefaultCommunications ? " (Default)" : "";
+            Console.WriteLine($"{mic.Id} | {mic.Name}{defaultMarker}");
+        }
+    }
+    catch (Exception ex)
+    {
+        Log.Error(ex, "Failed to run CLI List command.");
+        Console.WriteLine($"Error: {ex.Message}");
+    }
+}
+
+static void RunDefaultCommand(WindowsAudioDeviceSwitcher switcher)
+{
+    try
+    {
+        Log.Information("Running CLI Default command.");
+        var mics = switcher.GetActiveMicrophones();
+        var def = mics.FirstOrDefault(m => m.IsDefaultCommunications);
+        if (def != null)
+        {
+            Console.WriteLine($"{def.Id} | {def.Name}");
+        }
+        else
+        {
+            Console.WriteLine("No default communications microphone found.");
+        }
+    }
+    catch (Exception ex)
+    {
+        Log.Error(ex, "Failed to run CLI Default command.");
+        Console.WriteLine($"Error: {ex.Message}");
+    }
+}
+
+static async Task RunSwitchCommandAsync(WindowsAudioDeviceSwitcher switcher, string identifier)
+{
+    try
+    {
+        Log.Information("Running CLI Switch command for identifier: {Identifier}", identifier);
+        var mics = switcher.GetActiveMicrophones();
+        AudioDeviceInfo? selected = null;
+
+        if (Guid.TryParse(identifier, out Guid id))
+        {
+            selected = mics.FirstOrDefault(m => m.Id == id);
+        }
+
+        if (selected == null)
+        {
+            selected = mics.FirstOrDefault(m => m.Name.Contains(identifier, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (selected == null)
+        {
+            Log.Warning("CLI Switch command failed: device not found for identifier: {Identifier}", identifier);
+            Console.WriteLine($"Error: Microphone '{identifier}' not found.");
+            return;
+        }
+
+        if (selected.IsDefaultCommunications)
+        {
+            Console.WriteLine($"\"{selected.Name}\" is already the default.");
+            return;
+        }
+
+        bool success = await switcher.SetDefaultCommunicationsMicrophoneAsync(selected.Id);
+        if (success)
+        {
+            Log.Information("Successfully switched default communications microphone to {DeviceName} ({DeviceId}) via CLI", selected.Name, selected.Id);
+            Console.WriteLine($"Successfully switched to '{selected.Name}'.");
+        }
+        else
+        {
+            Log.Warning("Failed to switch default communications microphone to {DeviceName} via CLI", selected.Name);
+            Console.WriteLine($"Error: Could not switch to '{selected.Name}'.");
+        }
+    }
+    catch (Exception ex)
+    {
+        Log.Error(ex, "Exception occurred during CLI Switch command for: {Identifier}", identifier);
+        Console.WriteLine($"Error: {ex.Message}");
+    }
+}
+
+static void PrintHelp()
+{
+    AnsiConsole.MarkupLine("[cyan]MicShift CLI Arguments Help:[/]");
+    AnsiConsole.MarkupLine("  [yellow]--list, -l[/]                     List all active microphones.");
+    AnsiConsole.MarkupLine("  [yellow]--default, -d[/]                  Show the default communications microphone.");
+    AnsiConsole.MarkupLine("  [yellow]--switch, -s <Name or ID>[/]       Switch the default microphone to the specified one.");
+    AnsiConsole.MarkupLine("  [yellow]--help, -h[/]                     Show this help message.");
+    AnsiConsole.MarkupLine("");
+    AnsiConsole.MarkupLine("If run without arguments, MicShift starts in interactive menu mode.");
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
