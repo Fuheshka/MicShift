@@ -35,6 +35,10 @@ public partial class App : System.Windows.Application
         Log.Information("MicShift WPF App started.");
 
         var switcher = new WindowsAudioDeviceSwitcher();
+        var appSettings = SettingsManager.Load();
+
+        // Apply saved theme
+        ApplyTheme(appSettings.IsDarkMode);
 
         if (args.Length > 0)
         {
@@ -51,17 +55,16 @@ public partial class App : System.Windows.Application
                     ShowWindow(consoleHandle, SW_HIDE);
                 }
 
-                var settings = SettingsManager.Load();
-                var autoSwitch = new AutoSwitchService(switcher, settings.DeskMicrophoneName, settings.HeadsetMicrophoneName);
+                var autoSwitch = new AutoSwitchService(switcher, appSettings.DeskMicrophoneName, appSettings.HeadsetMicrophoneName);
 
                 NotificationManager.Initialize(switcher, autoSwitch);
                 HotkeyManager.Start(switcher, autoSwitch);
 
-                if (settings.AutoSwitchEnabled && !string.IsNullOrEmpty(settings.DeskMicrophoneName) && !string.IsNullOrEmpty(settings.HeadsetMicrophoneName))
+                if (appSettings.AutoSwitchEnabled && !string.IsNullOrEmpty(appSettings.DeskMicrophoneName) && !string.IsNullOrEmpty(appSettings.HeadsetMicrophoneName))
                 {
                     autoSwitch.Start();
                 }
-                else if (string.IsNullOrEmpty(settings.DeskMicrophoneName) || string.IsNullOrEmpty(settings.HeadsetMicrophoneName))
+                else if (string.IsNullOrEmpty(appSettings.DeskMicrophoneName) || string.IsNullOrEmpty(appSettings.HeadsetMicrophoneName))
                 {
                     NotificationManager.Show("MicShift Config", "Calibration not completed. Please open settings from tray or run in UI mode.");
                 }
@@ -109,8 +112,7 @@ public partial class App : System.Windows.Application
             return;
         }
 
-        // GUI mode (launch MainWindow)
-        var appSettings = SettingsManager.Load();
+        // GUI mode (launch MainWindow in Views/MainWindow)
         var mainAutoSwitch = new AutoSwitchService(switcher, appSettings.DeskMicrophoneName, appSettings.HeadsetMicrophoneName);
 
         NotificationManager.Initialize(switcher, mainAutoSwitch);
@@ -123,6 +125,23 @@ public partial class App : System.Windows.Application
 
         var mainWindow = new MainWindow(switcher, mainAutoSwitch);
         mainWindow.Show();
+    }
+
+    public static void ApplyTheme(bool isDark)
+    {
+        var themeUri = new Uri(isDark ? "Themes/DarkTheme.xaml" : "Themes/LightTheme.xaml", UriKind.Relative);
+        try
+        {
+            var dict = new ResourceDictionary { Source = themeUri };
+            var resources = Current.Resources;
+            resources.MergedDictionaries.Clear();
+            resources.MergedDictionaries.Add(dict);
+            Log.Debug("Theme applied: {Theme}", isDark ? "Dark" : "Light");
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Failed to apply theme {Theme}", isDark ? "Dark" : "Light");
+        }
     }
 
     // ── CLI Command Handlers ───────────────────────────────────────────────────

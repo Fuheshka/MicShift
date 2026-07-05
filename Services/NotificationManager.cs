@@ -55,7 +55,7 @@ public static class NotificationManager
                 if (switcher.ToggleDefaultMicrophoneMute(out string devName, out bool isMuted))
                 {
                     string status = isMuted ? "MUTED ❌" : "UNMUTED 🎙️";
-                    Show("MicShift - Mute Toggle", $"{devName} is now {status}");
+                    Show("Mute Toggle", $"{devName} is now {status}");
                 }
             });
 
@@ -64,7 +64,7 @@ public static class NotificationManager
                 var newMic = await switcher.CycleDefaultCommunicationsMicrophoneAsync();
                 if (newMic != null)
                 {
-                    Show("MicShift - Microphone Changed", $"Switched to:\n{newMic.Name}");
+                    Show("Microphone Changed", $"Switched to:\n{newMic.Name}");
                 }
             });
 
@@ -90,12 +90,12 @@ public static class NotificationManager
                 if (settings.AutoSwitchEnabled)
                 {
                     autoSwitchService.Start();
-                    Show("MicShift Auto-Switch", "Auto-switching is active.");
+                    Show("Auto-Switch", "Auto-switching enabled.");
                 }
                 else
                 {
                     autoSwitchService.Stop();
-                    Show("MicShift Auto-Switch", "Auto-switching paused.");
+                    Show("Auto-Switch", "Auto-switching disabled.");
                 }
             });
 
@@ -122,15 +122,14 @@ public static class NotificationManager
             _contextMenu.Items.Add(cycleItem);
             _contextMenu.Items.Add(new ToolStripSeparator());
             _contextMenu.Items.Add(autoSwitchItem);
-            _contextMenu.Items.Add(new ToolStripSeparator());
             _contextMenu.Items.Add(exitItem);
 
             _notifyIcon.ContextMenuStrip = _contextMenu;
-            Log.Information("System Tray notification icon initialized successfully.");
+            Log.Information("System Tray icon initialized successfully.");
         }
         catch (Exception ex)
         {
-            Log.Error(ex, "Failed to initialize NotifyIcon for System Tray.");
+            Log.Error(ex, "Failed to initialize System Tray icon.");
         }
     }
 
@@ -151,10 +150,22 @@ public static class NotificationManager
 
     public static void Show(string title, string message)
     {
-        if (_notifyIcon != null && SettingsManager.Load().NotificationsEnabled)
+        if (Application.Current == null) return;
+
+        if (!SettingsManager.Load().NotificationsEnabled) return;
+
+        Application.Current.Dispatcher.Invoke(() =>
         {
-            _notifyIcon.ShowBalloonTip(3000, title, message, ToolTipIcon.Info);
-        }
+            try
+            {
+                var overlay = new Views.NotificationOverlayWindow(title, message);
+                overlay.Show();
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "Failed to show custom overlay notification.");
+            }
+        });
     }
 
     public static void Dispose()

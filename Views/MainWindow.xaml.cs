@@ -7,6 +7,8 @@ using Serilog;
 
 using Color = System.Windows.Media.Color;
 using ProgressBar = System.Windows.Controls.ProgressBar;
+using Brush = System.Windows.Media.Brush;
+using Brushes = System.Windows.Media.Brushes;
 
 namespace MicShift;
 
@@ -45,6 +47,9 @@ public partial class MainWindow : Window
                 pulseStoryboard.Begin(this);
             }
 
+            // Set default tab navigation view
+            UpdateSidebarNavigation(0);
+
             RefreshMicrophoneLists();
 
             // Load saved settings
@@ -61,6 +66,7 @@ public partial class MainWindow : Window
             }
 
             NotificationsToggle.IsChecked = settings.NotificationsEnabled;
+            ThemeToggle.IsChecked = settings.IsDarkMode;
 
             // Check if microphones are configured
             bool isConfigured = !string.IsNullOrEmpty(settings.DeskMicrophoneName) && !string.IsNullOrEmpty(settings.HeadsetMicrophoneName);
@@ -121,8 +127,8 @@ public partial class MainWindow : Window
         float deskLevel = _autoSwitch.DeskPeakLevel;
         float headsetLevel = _autoSwitch.HeadsetPeakLevel;
 
-        AnimateBar(DeskLevelBar, DeskLevelValue, deskLevel, new SolidColorBrush(Color.FromRgb(6, 182, 212))); // Cyan
-        AnimateBar(HeadsetLevelBar, HeadsetLevelValue, headsetLevel, new SolidColorBrush(Color.FromRgb(16, 185, 129))); // Emerald Green
+        AnimateBar(DeskLevelBar, DeskLevelValue, deskLevel, FindResource("AccentColor") as SolidColorBrush ?? new SolidColorBrush(Color.FromRgb(6, 182, 212)));
+        AnimateBar(HeadsetLevelBar, HeadsetLevelValue, headsetLevel, FindResource("SecondaryAccentColor") as SolidColorBrush ?? new SolidColorBrush(Color.FromRgb(16, 185, 129)));
     }
 
     private void AnimateBar(ProgressBar bar, TextBlock valueText, float targetLevel, SolidColorBrush activeColor)
@@ -217,24 +223,72 @@ public partial class MainWindow : Window
         SettingsManager.Save(settings);
     }
 
+    private void OnThemeToggled(object sender, RoutedEventArgs e)
+    {
+        if (_isInitializing) return;
+
+        bool isDark = ThemeToggle.IsChecked ?? false;
+
+        var settings = SettingsManager.Load();
+        settings.IsDarkMode = isDark;
+        SettingsManager.Save(settings);
+
+        // Apply theme dynamically
+        App.ApplyTheme(isDark);
+
+        // Refresh navigation bar buttons background color since resources changed
+        UpdateSidebarNavigation(MainTabControl.SelectedIndex);
+    }
+
     private void UpdateStatusUI()
     {
         if (_autoSwitch.IsRunning)
         {
             StatusIndicator.Fill = new SolidColorBrush(Color.FromRgb(16, 185, 129)); // Emerald Green
-            StatusText.Text = "Auto-Switching is Active";
+            StatusText.Text = "Active";
         }
         else
         {
             StatusIndicator.Fill = new SolidColorBrush(Color.FromRgb(239, 68, 68)); // Red
-            StatusText.Text = "Auto-Switching is Inactive";
+            StatusText.Text = "Inactive";
+        }
+    }
+
+    private void OnNavDashboardClick(object sender, RoutedEventArgs e)
+    {
+        UpdateSidebarNavigation(0);
+    }
+
+    private void OnNavSettingsClick(object sender, RoutedEventArgs e)
+    {
+        UpdateSidebarNavigation(1);
+    }
+
+    private void UpdateSidebarNavigation(int selectedIndex)
+    {
+        MainTabControl.SelectedIndex = selectedIndex;
+
+        // Update visual active states for navigation buttons
+        if (selectedIndex == 0)
+        {
+            NavDashboardBtn.Background = FindResource("CardBackground") as Brush;
+            NavDashboardBtn.Foreground = FindResource("AccentColor") as Brush;
+            NavSettingsBtn.Background = Brushes.Transparent;
+            NavSettingsBtn.Foreground = FindResource("MutedText") as Brush;
+        }
+        else
+        {
+            NavDashboardBtn.Background = Brushes.Transparent;
+            NavDashboardBtn.Foreground = FindResource("MutedText") as Brush;
+            NavSettingsBtn.Background = FindResource("CardBackground") as Brush;
+            NavSettingsBtn.Foreground = FindResource("AccentColor") as Brush;
         }
     }
 
     private void OnMinimizeToTrayClick(object sender, RoutedEventArgs e)
     {
         this.Hide();
-        NotificationManager.Show("MicShift Running", "MicShift is running in the background. Double-click the tray icon to open.");
+        NotificationManager.Show("MicShift", "Running in background.");
     }
 
     public void PrepareForExit()
@@ -260,6 +314,6 @@ public partial class MainWindow : Window
         // Intercept close button and hide instead
         e.Cancel = true;
         this.Hide();
-        NotificationManager.Show("MicShift Running", "MicShift is running in the background. Double-click the tray icon to open.");
+        NotificationManager.Show("MicShift", "Running in background.");
     }
 }

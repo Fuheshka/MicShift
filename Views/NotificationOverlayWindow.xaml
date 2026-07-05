@@ -1,0 +1,33 @@
+<Window x:Class="MicShift.Views.NotificationOverlayWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Notification" Height="80" Width="330"
+        WindowStyle="None" AllowsTransparency="True" Background="Transparent"
+        Topmost="True" ShowInTaskbar="False" Focusable="False">
+    <Grid>
+        <Border CornerRadius="12" BorderThickness="1" 
+                Background="{DynamicResource CardBackground}" 
+                BorderBrush="{DynamicResource BorderBrush}">
+            <Border.Effect>
+                <DropShadowEffect BlurRadius="15" Color="#000000" Opacity="0.35" ShadowDepth="2"/>
+            </Border.Effect>
+            <Grid Margin="15,10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                
+                <!-- Mic Icon with Accent Color -->
+                <Path Grid.Column="0" Fill="{DynamicResource AccentColor}" Width="22" Height="22" Margin="5,0,15,0"
+                      VerticalAlignment="Center" HorizontalAlignment="Center" Stretch="Uniform"
+                      Data="M12,2A3,3 0 0,0 9,5V11A3,3 0 0,0 12,14A3,3 0 0,0 15,11V5A3,3 0 0,0 12,2M19,11C19,14.53 16.39,17.44 13,17.93V21H11V17.93C7.61,17.44 5,14.53 5,11H7A5,5 0 0,0 12,16A5,5 0 0,0 17,11H19Z"/>
+                
+                <!-- Text Content -->
+                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                    <TextBlock x:Name="TitleText" Text="Notification Title" FontWeight="Bold" FontSize="13" Foreground="{DynamicResource Foreground}"/>
+                    <TextBlock x:Name="MessageText" Text="Details will go here" FontSize="11" Foreground="{DynamicResource MutedText}" Margin="0,3,0,0" TextWrapping="Wrap"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

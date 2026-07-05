@@ -92,12 +92,12 @@ public static class HotkeyManager
                         if (switcher.ToggleDefaultMicrophoneMute(out string devName, out bool isMuted))
                         {
                             string status = isMuted ? "MUTED ❌" : "UNMUTED 🎙️";
-                            NotificationManager.Show("MicShift - Mute Toggle", $"{devName} is now {status}");
+                            NotificationManager.Show("Mute Toggle", $"{devName} is now {status}");
                             Log.Information("Toggled mute state for device {DeviceName}. New state: {Muted}", devName, isMuted);
                         }
                         else
                         {
-                            NotificationManager.Show("MicShift", "No default communications microphone found to mute.");
+                            NotificationManager.Show("Mute Error", "No default microphone found to mute.");
                         }
                     }
                     catch (Exception ex)
@@ -115,12 +115,12 @@ public static class HotkeyManager
                             var newMic = await switcher.CycleDefaultCommunicationsMicrophoneAsync();
                             if (newMic != null)
                             {
-                                NotificationManager.Show("MicShift - Microphone Changed", $"Switched to:\n{newMic.Name}");
+                                NotificationManager.Show("Microphone Cycle", $"Switched to:\n{newMic.Name}");
                                 Log.Information("Cycled default microphone to {DeviceName} ({DeviceId})", newMic.Name, newMic.Id);
                             }
                             else
                             {
-                                NotificationManager.Show("MicShift", "Could not cycle microphone (no other active microphones).");
+                                NotificationManager.Show("Cycle Error", "No other active microphones to cycle.");
                             }
                         }
                         catch (Exception ex)

@@ -191,7 +191,7 @@ public sealed class AutoSwitchService : IDisposable
                 if (success)
                 {
                     Log.Information("AutoSwitch: Switched default microphone to {DeviceName}", target.Name);
-                    NotificationManager.Show("MicShift Auto-Switch", $"Switched to: {target.Name}");
+                    NotificationManager.Show("Auto-Switch", $"Switched to:\n{target.Name}");
                 }
             }
         }
