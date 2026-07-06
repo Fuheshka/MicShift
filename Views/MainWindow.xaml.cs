@@ -180,8 +180,11 @@ public partial class MainWindow : Window
 
     private void AnimateBar(ProgressBar bar, TextBlock valueText, float targetLevel, SolidColorBrush activeColor)
     {
-        float targetValue = targetLevel * 100f;
+        // Apply a non-linear curve to make small volume levels much more visible on the UI
+        float visualLevel = targetLevel > 0 ? (float)Math.Pow(targetLevel, 0.4) : 0f;
+        float targetValue = visualLevel * 100f;
 
+        if (targetValue > 100f) targetValue = 100f;
         // Smoothly animate ProgressBar Value
         var animation = new DoubleAnimation
         {
