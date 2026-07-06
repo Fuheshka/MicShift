@@ -3,7 +3,7 @@ namespace MicShift;
 /// <summary>
 /// Immutable snapshot of an audio capture device at the time of query.
 /// </summary>
-public sealed record AudioDeviceInfo(Guid Id, string Name, bool IsDefaultCommunications);
+public sealed record AudioDeviceInfo(Guid Id, string Name, bool IsDefaultCommunications, string EndpointId = "");
 
 /// <summary>
 /// Contract for listing and switching the default communications microphone.

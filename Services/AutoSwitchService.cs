@@ -66,8 +66,27 @@ public sealed class AutoSwitchService : IDisposable
 
         try
         {
-            _deskMonitor    = new AudioMonitorService(_deskName);
-            _headsetMonitor = new AudioMonitorService(_headsetName);
+            // Resolve endpoint IDs through the switcher so the COM monitor
+            // can find the exact WASAPI device without any name-matching hacks.
+            var mics = _switcher.GetActiveMicrophones();
+            var deskDevice    = mics.FirstOrDefault(m => m.Name.Equals(_deskName, StringComparison.OrdinalIgnoreCase));
+            var headsetDevice = mics.FirstOrDefault(m => m.Name.Equals(_headsetName, StringComparison.OrdinalIgnoreCase));
+
+            if (deskDevice == null || headsetDevice == null)
+            {
+                Log.Warning("AutoSwitch: Could not find one or both devices by name. Desk={DeskFound}, Headset={HeadsetFound}",
+                    deskDevice != null, headsetDevice != null);
+                return;
+            }
+
+            if (string.IsNullOrEmpty(deskDevice.EndpointId) || string.IsNullOrEmpty(headsetDevice.EndpointId))
+            {
+                Log.Warning("AutoSwitch: EndpointId is empty for one or both devices.");
+                return;
+            }
+
+            _deskMonitor    = new AudioMonitorService(deskDevice.EndpointId, deskDevice.Name);
+            _headsetMonitor = new AudioMonitorService(headsetDevice.EndpointId, headsetDevice.Name);
         }
         catch (Exception ex)
         {
@@ -103,8 +122,9 @@ public sealed class AutoSwitchService : IDisposable
 
     private async Task RunAutoSwitchLoopAsync(CancellationToken token)
     {
-        const float silenceThreshold          = 0.03f; // 3% volume floor
-        const int   requiredConsecutiveSamples = 6;    // ~200ms of consistent difference
+        const float silenceThreshold           = 0.05f;  // 5% volume floor (ignores ambient noise)
+        const float switchRatio                 = 2.5f;   // device must be 2.5× louder than the other
+        const int   requiredConsecutiveSamples  = 15;     // ~500ms of consistent difference
 
         int deskWinsCount    = 0;
         int headsetWinsCount = 0;
@@ -146,12 +166,12 @@ public sealed class AutoSwitchService : IDisposable
                 {
                     if (deskLevel > silenceThreshold || headsetLevel > silenceThreshold)
                     {
-                        if (deskLevel > headsetLevel * 1.5f)
+                        if (deskLevel > headsetLevel * switchRatio)
                         {
                             deskWinsCount++;
                             headsetWinsCount = 0;
                         }
-                        else if (headsetLevel > deskLevel * 1.5f)
+                        else if (headsetLevel > deskLevel * switchRatio)
                         {
                             headsetWinsCount++;
                             deskWinsCount = 0;

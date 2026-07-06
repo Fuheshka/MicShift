@@ -21,7 +21,7 @@ public sealed class WindowsAudioDeviceSwitcher : IAudioDeviceSwitcher, IDisposab
         {
             return _controller
                 .GetCaptureDevices(DeviceState.Active)
-                .Select(d => new AudioDeviceInfo(d.Id, d.FullName, d.IsDefaultCommunicationsDevice))
+                .Select(d => new AudioDeviceInfo(d.Id, d.FullName, d.IsDefaultCommunicationsDevice, d.RealId))
                 .ToList();
         }
         catch (Exception ex)

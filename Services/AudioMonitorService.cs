@@ -1,148 +1,156 @@
-using NAudio.Wave;
+using System.Runtime.InteropServices;
 using Serilog;
+using Timer = System.Threading.Timer;
 
 namespace MicShift;
 
 /// <summary>
-/// Streams audio from a single capture device using WinMM WaveInEvent
-/// and exposes a rolling peak level (0.0 – 1.0).
-/// Uses 100% safe WinMM APIs to avoid COM cast exceptions with AudioSwitcher.
+/// Reads the real-time peak audio level for a single capture device using
+/// the Windows Core Audio COM API (IAudioMeterInformation) directly.
+/// 
+/// This avoids NAudio entirely, preventing the COM RCW conflict
+/// ("Unable to cast System.__ComObject to MMDeviceEnumeratorComObject")
+/// that occurs when both AudioSwitcher and NAudio try to create
+/// MMDeviceEnumerator COM objects in the same process.
 /// </summary>
 public sealed class AudioMonitorService : IDisposable
 {
-    private WaveInEvent? _waveIn;
+    // ── COM Interop Definitions ──────────────────────────────────────────────
+
+    /// <summary>
+    /// Our own coclass for MMDeviceEnumerator.
+    /// Using a unique .NET type name prevents RCW cache collisions with AudioSwitcher.
+    /// </summary>
+    [ComImport, Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")]
+    private class MicShiftDeviceEnumerator { }
+
+    [Guid("A95664D2-9614-4F35-A746-DE8DB63617E6")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IMMDeviceEnumerator
+    {
+        [PreserveSig] int EnumAudioEndpoints(int dataFlow, int stateMask, out IntPtr ppDevices);
+        [PreserveSig] int GetDefaultAudioEndpoint(int dataFlow, int role, out IntPtr ppEndpoint);
+        [PreserveSig] int GetDevice([MarshalAs(UnmanagedType.LPWStr)] string pwstrId, out IMMDevice ppDevice);
+        [PreserveSig] int RegisterEndpointNotificationCallback(IntPtr pClient);
+        [PreserveSig] int UnregisterEndpointNotificationCallback(IntPtr pClient);
+    }
+
+    [Guid("D666063F-1587-4E43-81F1-B948E807363F")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IMMDevice
+    {
+        [PreserveSig] int Activate(ref Guid iid, int dwClsCtx, IntPtr pActivationParams,
+                                   [MarshalAs(UnmanagedType.IUnknown)] out object ppInterface);
+        [PreserveSig] int OpenPropertyStore(int stgmAccess, out IntPtr ppProperties);
+        [PreserveSig] int GetId([MarshalAs(UnmanagedType.LPWStr)] out string ppstrId);
+        [PreserveSig] int GetState(out int pdwState);
+    }
+
+    [Guid("C02216F6-8C67-4B5B-9D00-D008E73E0064")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IAudioMeterInformation
+    {
+        [PreserveSig] int GetPeakValue(out float pfPeak);
+        [PreserveSig] int GetMeteringChannelCount(out int pnChannelCount);
+        [PreserveSig] int GetChannelsPeakValues(int u32ChannelCount,
+                                                [MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 0)] float[] afPeakValues);
+        [PreserveSig] int QueryHardwareSupport(out int pdwHardwareSupportMask);
+    }
+
+    private const int CLSCTX_ALL = 23; // CLSCTX_INPROC_SERVER | HANDLER | LOCAL | REMOTE
+
+    // ── Instance State ───────────────────────────────────────────────────────
+
+    private object? _enumeratorRef;   // prevent GC of the enumerator RCW
+    private object? _deviceRef;       // prevent GC of the device RCW
+    private IAudioMeterInformation? _meter;
+    private Timer? _pollTimer;
     private volatile float _currentPeakLevel;
-    private volatile Exception? _lastException;
-    private bool _disposed;
+    private volatile bool _disposed;
 
     public string DeviceName { get; }
-    public Exception? LastException => _lastException;
+    public Exception? LastException { get; private set; }
     public float CurrentPeakLevel => _currentPeakLevel;
 
-    public AudioMonitorService(string friendlyName)
+    /// <summary>
+    /// Creates a peak meter for the device with the given Windows endpoint ID.
+    /// </summary>
+    /// <param name="endpointId">
+    /// Windows endpoint ID string (e.g. "{0.0.1.00000000}.{guid}"),
+    /// obtained from <see cref="AudioDeviceInfo.EndpointId"/>.
+    /// </param>
+    /// <param name="friendlyName">Human-readable device name for logging.</param>
+    public AudioMonitorService(string endpointId, string friendlyName)
     {
         DeviceName = friendlyName;
 
         try
         {
-            int deviceIndex = FindWaveInDeviceIndex(friendlyName);
-            if (deviceIndex < 0)
-            {
-                Log.Warning("WaveIn Monitor: Could not find matching WaveIn device for {DeviceName}", friendlyName);
-                return;
-            }
+            // 1. Create our own MMDeviceEnumerator COM object (unique .NET type → no RCW conflict).
+            var enumerator = (IMMDeviceEnumerator)new MicShiftDeviceEnumerator();
+            _enumeratorRef = enumerator;
 
-            _waveIn = new WaveInEvent
-            {
-                DeviceNumber = deviceIndex,
-                WaveFormat   = new WaveFormat(rate: 44100, bits: 16, channels: 1),
-                BufferMilliseconds = 50
-            };
+            // 2. Get the device by its endpoint ID.
+            int hr = enumerator.GetDevice(endpointId, out IMMDevice device);
+            Marshal.ThrowExceptionForHR(hr);
+            _deviceRef = device;
 
-            _waveIn.DataAvailable += OnDataAvailable;
-            _waveIn.RecordingStopped += (sender, args) =>
-            {
-                if (args.Exception != null)
-                {
-                    _lastException = args.Exception;
-                    Log.Error(args.Exception, "WaveIn recording stopped unexpectedly for {DeviceName}", friendlyName);
-                }
-            };
-            
-            _waveIn.StartRecording();
-            Log.Information("WaveIn Monitor started for device: {DeviceName} (Index: {Index})", friendlyName, deviceIndex);
+            // 3. Activate IAudioMeterInformation on the device.
+            Guid iid = typeof(IAudioMeterInformation).GUID;
+            hr = device.Activate(ref iid, CLSCTX_ALL, IntPtr.Zero, out object meterObj);
+            Marshal.ThrowExceptionForHR(hr);
+            _meter = (IAudioMeterInformation)meterObj;
+
+            // 4. Start polling at ~30 Hz.
+            _pollTimer = new Timer(_ => PollPeakValue(), null, 0, 33);
+
+            Log.Information("COM Peak Meter started for {Device} (EndpointId: {Id})", friendlyName, endpointId);
         }
         catch (Exception ex)
         {
-            _lastException = ex;
-            Log.Error(ex, "Failed to start WaveIn audio monitor for {DeviceName}", friendlyName);
+            LastException = ex;
+            Log.Error(ex, "Failed to start COM peak meter for {Device} (EndpointId: {Id})", friendlyName, endpointId);
         }
     }
 
-    private static int FindWaveInDeviceIndex(string friendlyName)
+    private void PollPeakValue()
     {
-        int count = WaveIn.DeviceCount;
-        if (count == 0) return -1;
+        if (_disposed) return;
 
-        // 1. Exact or partial name match
-        for (int i = 0; i < count; i++)
+        try
         {
-            try
+            if (_meter != null)
             {
-                WaveInCapabilities cap = WaveIn.GetCapabilities(i);
-                string capName = cap.ProductName;
-
-                if (friendlyName.Contains(capName, StringComparison.OrdinalIgnoreCase)
-                    || capName.Contains(friendlyName[..Math.Min(friendlyName.Length, 15)], StringComparison.OrdinalIgnoreCase))
+                int hr = _meter.GetPeakValue(out float peak);
+                if (hr == 0)
                 {
-                    return i;
-                }
-            }
-            catch (Exception ex)
-            {
-                Log.Verbose(ex, "Failed to get WaveIn capabilities for index {Index}", i);
-            }
-        }
-
-        // 2. Keyword match (e.g. matching "PD200X", "G435")
-        var words = friendlyName.Split(new[] { ' ', '(', ')', '-', '_' }, StringSplitOptions.RemoveEmptyEntries)
-                                .Where(w => w.Length >= 3 && w.Any(char.IsLetterOrDigit));
-        foreach (var word in words)
-        {
-            for (int i = 0; i < count; i++)
-            {
-                try
-                {
-                    if (WaveIn.GetCapabilities(i).ProductName.Contains(word, StringComparison.OrdinalIgnoreCase))
-                    {
-                        return i;
-                    }
-                }
-                catch
-                {
-                    // Ignore capabilities errors
+                    _currentPeakLevel = peak; // 0.0 – 1.0 from WASAPI
                 }
             }
         }
-
-        // 3. Fallback to 0 (default system device index) if nothing matches
-        Log.Warning("WaveIn Monitor: No match found for {DeviceName}. Falling back to default device index 0.", friendlyName);
-        return 0;
-    }
-
-    private void OnDataAvailable(object? sender, WaveInEventArgs e)
-    {
-        float peak = 0f;
-
-        for (int i = 0; i < e.BytesRecorded; i += 2)
+        catch
         {
-            short sample = BitConverter.ToInt16(e.Buffer, i);
-            float normalized = Math.Abs(sample / 32768f);
-            if (normalized > peak)
-                peak = normalized;
+            // Swallow — timer will retry on next tick.
         }
-
-        _currentPeakLevel = peak;
     }
 
     public void Dispose()
     {
         if (_disposed) return;
-        
+        _disposed = true;
+
+        _pollTimer?.Dispose();
+        _pollTimer = null;
+
         try
         {
-            if (_waveIn != null)
-            {
-                _waveIn.StopRecording();
-                _waveIn.DataAvailable -= OnDataAvailable;
-                _waveIn.Dispose();
-            }
+            if (_meter != null) { Marshal.ReleaseComObject(_meter); _meter = null; }
+            if (_deviceRef != null) { Marshal.ReleaseComObject(_deviceRef); _deviceRef = null; }
+            if (_enumeratorRef != null) { Marshal.ReleaseComObject(_enumeratorRef); _enumeratorRef = null; }
         }
         catch (Exception ex)
         {
-            Log.Debug(ex, "Exception disposing WaveIn for {DeviceName}", DeviceName);
+            Log.Debug(ex, "Exception releasing COM objects for peak meter {Device}", DeviceName);
         }
-
-        _disposed = true;
     }
 }

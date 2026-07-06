@@ -5,7 +5,7 @@
     <TargetFramework>net10.0-windows</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <!-- Required so the SDK resolves NAudio's WindowsForms dependency during cross-compilation -->
+    <!-- Required for System.Windows.Forms.NotifyIcon (tray icon) -->
     <UseWindowsForms>true</UseWindowsForms>
     <UseWPF>true</UseWPF>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
@@ -16,7 +16,7 @@
   <ItemGroup>
     <!-- AudioSwitcher targets .NET Framework but works via compatibility shim on .NET 10 -->
     <PackageReference Include="AudioSwitcher.AudioApi.CoreAudio" Version="3.0.3" NoWarn="NU1701" />
-    <PackageReference Include="NAudio" Version="2.3.0" />
+
     <PackageReference Include="Spectre.Console" Version="0.49.1" />
     <PackageReference Include="Serilog" Version="4.0.0" />
     <PackageReference Include="Serilog.Sinks.File" Version="6.0.0" />
