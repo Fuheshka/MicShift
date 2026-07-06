@@ -1,3 +1,7 @@
+[**🇷🇺 Русский**](README.ru.md) | [**🇺🇸 English**](README.md)
+
+---
+
 <p align="center">
   <img src="logo.png" alt="MicShift Logo" width="128" height="128" />
 </p>
@@ -5,7 +9,7 @@
 <h1 align="center">MicShift</h1>
 
 <p align="center">
-  <strong>Умное управление и автоматическое переключение микрофонов в реальном времени для Windows</strong>
+  <strong>Smart real-time microphone management and automatic switching for Windows</strong>
 </p>
 
 <p align="center">
@@ -17,101 +21,103 @@
 
 ---
 
-**MicShift** — это современная и легкая системная утилита для Windows, разработанная на C# (.NET 10 & WPF). Программа в реальном времени анализирует уровень звукового сигнала с ваших устройств ввода и автоматически переключает активный микрофон связи (например, переходит с настольного микрофона на гарнитуру, когда вы отходите от стола).
+**MicShift** is a modern and lightweight system utility for Windows, developed in C# (.NET 10 & WPF). The program analyzes the audio signal level from your input devices in real-time and automatically switches the active communication microphone (for example, switching from a desktop microphone to a headset when you step away from your desk).
 
 ---
 
-## ✨ Основные преимущества
+## ✨ Key Features
 
-### 1. Архитектура мониторинга на базе WASAPI
-* Вместо старого метода захвата звукового потока (NAudio `WaveInEvent`), который приводил к конфликтам монопольного доступа и блокировкам устройств другими приложениями (Discord, OBS и др.), MicShift использует современные API **WASAPI Core Audio**.
-* Уровень сигнала считывается напрямую через интерфейс Windows `AudioMeterInformation.MasterPeakValue`. Это гарантирует 100% надежность, исключает сбои и работает с нулевой нагрузкой на процессор.
+### 1. WASAPI-based Monitoring Architecture
+* Instead of the legacy audio stream capture method (NAudio `WaveInEvent`), which led to exclusive access conflicts and device locking by other applications (Discord, OBS, etc.), MicShift uses modern **WASAPI Core Audio** APIs.
+* The signal level is read directly via the Windows `AudioMeterInformation.MasterPeakValue` interface. This ensures 100% reliability, prevents crashes, and operates with zero CPU overhead.
 
-### 2. Динамическая смена тем (Светлая / Темная)
-* Программа поддерживает полноценные темную и светлую темы интерфейса.
-* Цветовые ресурсы вынесены в отдельные словари `Themes/DarkTheme.xaml` и `Themes/LightTheme.xaml`.
-* Переключение темы происходит мгновенно прямо в окне настроек без перезапуска приложения.
+### 2. Dynamic Theme Switching (Light / Dark)
+* The application supports fully featured dark and light interface themes.
+* Color resources are extracted into separate dictionaries: `Themes/DarkTheme.xaml` and `Themes/LightTheme.xaml`.
+* Theme switching happens instantly in the settings window without requiring an app restart.
 
-### 3. Интерактивный Сайдбар-интерфейс (WPF)
-* Разделение интерфейса на логические вкладки:
-  * **Dashboard:** Главная панель с индикатором работы, выбором устройств по умолчанию, анимированными полосами уровней звука (VU-метрами) и тумблером автопереключения.
-  * **Settings:** Второстепенные настройки программы, включающие в себя тумблер всплывающих HUD-уведомлений, выбор темы оформления и подсказки по горячим клавишам.
-* Шкалы громкости анимированы сглаживанием `QuadraticEase` для достижения плавного движения.
+### 3. Interactive Sidebar Interface (WPF)
+* The UI is separated into logical tabs:
+  * **Dashboard:** The main panel featuring a status indicator, default device selection, animated audio level bars (VU meters), and an auto-switch toggle.
+  * **Settings:** Secondary program settings, including a toggle for popup HUD notifications, theme selection, and hotkey hints.
+* Volume bars are animated with `QuadraticEase` smoothing to achieve fluid motion.
 
-### 4. Кастомные OSD-уведомления (HUD Overlay)
-* Взамен стандартных, неповоротливых уведомлений Windows, которые долго висят и отвлекают от работы, MicShift содержит собственное оверлей-окно `NotificationOverlayWindow`.
-* Любые действия (срабатывание хоткея Mute, смена микрофона, переключение режимов) моментально отображаются в виде полупрозрачной аккуратной плашки в правом нижнем углу экрана над панелью задач, которая плавно исчезает через 1.2 секунды.
+### 4. Custom OSD Notifications (HUD Overlay)
+* Instead of standard, sluggish Windows notifications that linger and distract from work, MicShift features its own overlay window: `NotificationOverlayWindow`.
+* Any actions (Mute hotkey trigger, microphone switch, mode change) instantly appear as a neat, semi-transparent banner in the bottom right corner of the screen above the taskbar, which smoothly fades out after 1.2 seconds.
 
-### 5. Фоновый режим и глобальные горячие клавиши
-* Сворачивание в трей при клике на Close/Minimize с возможностью восстановления двойным кликом на иконку.
-* Глобальные горячие клавиши, перехватываемые из любых полноэкранных игр:
-  * `Ctrl + Alt + M` — быстро заглушить/включить активный микрофон (Mute).
-  * `Ctrl + Alt + S` — переключить микрофон по кругу (Cycle) среди активных устройств.
-
----
-
-## 📂 Структура проекта
-
-Файлы проекта логически организованы по директориям:
-* 📁 `Services/` — Сервисы автопереключения, глобальных хоткеев, WASAPI-мониторинга, управления треем и конфигурацией.
-* 📁 `Views/` — Главное окно настроек `MainWindow` и оверлей `NotificationOverlayWindow`.
-* 📁 `Themes/` — Ресурсные словари для светлого и темного стилей оформления.
-* 📄 `LICENSE` — Текст официальной лицензии MIT.
+### 5. Background Mode and Global Hotkeys
+* Minimizes to the system tray on Close/Minimize with the ability to restore via double-click on the icon.
+* Global hotkeys, interceptable from any fullscreen games:
+  * `Ctrl + Alt + M` — Quickly mute/unmute the active microphone.
+  * `Ctrl + Alt + S` — Cycle through the active microphones.
 
 ---
 
-## ⌨️ Горячие клавиши
+## 📂 Project Structure
 
-| Сочетание клавиш | Действие | Визуальный HUD |
+Project files are logically organized by directories:
+* 📁 `Services/` — Services for auto-switching, global hotkeys, WASAPI monitoring, tray management, and configuration.
+* 📁 `Views/` — The main settings window `MainWindow` and the `NotificationOverlayWindow` overlay.
+* 📁 `Themes/` — Resource dictionaries for light and dark styling.
+* 📄 `LICENSE` — Text of the official MIT license.
+
+---
+
+## ⌨️ Hotkeys
+
+| Key Combination | Action | Visual HUD |
 | :--- | :--- | :--- |
-| `Ctrl + Alt + M` | Включение/выключение звука микрофона | Да (статус мута) |
-| `Ctrl + Alt + S` | Переключение на следующий микрофон по кругу | Да (имя нового устройства) |
+| `Ctrl + Alt + M` | Mute/unmute microphone | Yes (mute status) |
+| `Ctrl + Alt + S` | Cycle to the next microphone | Yes (new device name) |
 
 ---
 
-## 🛠️ Параметры командной строки (CLI)
+## 🛠️ Command Line Parameters (CLI)
 
-При запуске с аргументами приложение работает в консольном режиме, выводит информацию в PowerShell/CMD и завершает процесс:
+When launched with arguments, the application runs in console mode, outputs information to PowerShell/CMD, and exits:
 
 ```bash
-# Вывести список всех активных микрофонов
+# List all active microphones
 MicShift.exe --list
 
-# Показать текущее устройство по умолчанию
+# Show the current default device
 MicShift.exe --default
 
-# Переключить микрофон по названию (или части названия) или GUID
+# Switch microphone by name (or part of the name) or GUID
 MicShift.exe --switch "PD200X Podcast Microphone"
 
-# Запустить приложение сразу свернутым в трей
+# Start the application immediately minimized to the tray
 MicShift.exe --tray
 
-# Вызвать справку
+# Show help
 MicShift.exe --help
 ```
 
 ---
 
-## 🚀 Настройка автозапуска в Windows
+## 🚀 Windows Autostart Setup
 
-Чтобы MicShift запускался вместе с Windows в системном трее:
-1. Нажмите `Win + R`, введите `shell:startup` и нажмите Enter.
-2. Создайте ярлык для файла `MicShift.exe`.
-3. В свойствах ярлыка в поле **«Объект»** в самом конце через пробел добавьте аргумент `--tray`.
-   * *Пример:* `"C:\Program Files\MicShift\MicShift.exe" --tray`
+To make MicShift start automatically with Windows in the system tray:
+1. Press `Win + R`, type `shell:startup`, and press Enter.
+2. Create a shortcut for the `MicShift.exe` file.
+3. In the shortcut properties, add the `--tray` argument at the very end of the **"Target"** field, separated by a space.
+   * *Example:* `"C:\Program Files\MicShift\MicShift.exe" --tray`
 
 ---
 
-## 📦 Сборка релиза (Single-File)
+## 📦 Release Build (Single-File)
 
-Для создания оптимизированного исполняемого файла без зависимостей от рантайма .NET:
+To create an optimized executable file (Framework-Dependent):
 
 ```bash
-dotnet publish MicShift.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:PublishReadyToRun=true -p:PublishTrimmed=false -o ./publish
+dotnet publish MicShift.csproj -c Release -r win-x64 -p:PublishSingleFile=true -o ./publish
 ```
+
+*(Note: The build configuration has been optimized to be Framework-Dependent to significantly reduce file size).*
 
 ---
 
-## 📝 Лицензия
+## 📝 License
 
-Проект распространяется под лицензией MIT. Подробнее см. в файле [LICENSE](LICENSE).
+This project is licensed under the MIT License. For more details, see the [LICENSE](LICENSE) file.
