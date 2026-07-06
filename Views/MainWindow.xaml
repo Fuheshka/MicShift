@@ -10,13 +10,7 @@
         Icon="../logo.png">
     
     <Window.Resources>
-        <!-- Pulsing Status Indicator Storyboard -->
-        <Storyboard x:Key="PulseStoryboard">
-            <DoubleAnimation Storyboard.TargetName="StatusIndicator" 
-                             Storyboard.TargetProperty="Opacity"
-                             From="0.4" To="1.0" Duration="0:0:1.0"
-                             AutoReverse="True" RepeatBehavior="Forever"/>
-        </Storyboard>
+
 
         <!-- iOS/Win11 Style Toggle Switch -->
         <Style x:Key="ToggleSwitchStyle" TargetType="CheckBox">

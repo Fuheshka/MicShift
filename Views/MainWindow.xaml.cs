@@ -42,11 +42,7 @@ public partial class MainWindow : Window
     {
         try
         {
-            // Start pulsing status indicator animation
-            if (FindResource("PulseStoryboard") is Storyboard pulseStoryboard)
-            {
-                pulseStoryboard.Begin(this);
-            }
+
 
             // Set default tab navigation view
             UpdateSidebarNavigation(0);
@@ -126,6 +122,8 @@ public partial class MainWindow : Window
 
     private void OnTimerTick(object? sender, EventArgs e)
     {
+        if (!this.IsVisible) return;
+
         // Update VU meters
         float deskLevel = _autoSwitch.DeskPeakLevel;
         float headsetLevel = _autoSwitch.HeadsetPeakLevel;
@@ -184,14 +182,10 @@ public partial class MainWindow : Window
         float targetValue = targetLevel * 100f;
         
         if (targetValue > 100f) targetValue = 100f;
-        // Smoothly animate ProgressBar Value
-        var animation = new DoubleAnimation
-        {
-            To = targetValue,
-            Duration = TimeSpan.FromMilliseconds(100),
-            EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut }
-        };
-        bar.BeginAnimation(ProgressBar.ValueProperty, animation);
+        
+        // Remove heavy WPF animations. Update value directly for high performance (already 30fps).
+        bar.BeginAnimation(ProgressBar.ValueProperty, null); 
+        bar.Value = targetValue;
 
         valueText.Text = $"{targetValue:F1}%";
 
