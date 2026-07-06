@@ -17,13 +17,6 @@ public sealed class AudioMonitorService : IDisposable
 {
     // ── COM Interop Definitions ──────────────────────────────────────────────
 
-    /// <summary>
-    /// Our own coclass for MMDeviceEnumerator.
-    /// Using a unique .NET type name prevents RCW cache collisions with AudioSwitcher.
-    /// </summary>
-    [ComImport, Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")]
-    private class MicShiftDeviceEnumerator { }
-
     [Guid("A95664D2-9614-4F35-A746-DE8DB63617E6")]
     [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     private interface IMMDeviceEnumerator
@@ -86,8 +79,12 @@ public sealed class AudioMonitorService : IDisposable
 
         try
         {
-            // 1. Create our own MMDeviceEnumerator COM object (unique .NET type → no RCW conflict).
-            var enumerator = (IMMDeviceEnumerator)new MicShiftDeviceEnumerator();
+            // 1. Create MMDeviceEnumerator directly via Activator to avoid RCW type-casting conflicts with AudioSwitcher.
+            Type enumeratorType = Type.GetTypeFromCLSID(new Guid("BCDE0395-E52F-467C-8E3D-C4579291692E"))
+                ?? throw new InvalidOperationException("MMDeviceEnumerator COM type not found.");
+            var enumeratorObj = Activator.CreateInstance(enumeratorType) 
+                ?? throw new InvalidOperationException("Failed to create MMDeviceEnumerator.");
+            var enumerator = (IMMDeviceEnumerator)enumeratorObj;
             _enumeratorRef = enumerator;
 
             // 2. Get the device by its endpoint ID.
