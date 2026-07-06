@@ -50,12 +50,31 @@ public sealed class AudioMonitorService : IDisposable
         [PreserveSig] int QueryHardwareSupport(out int pdwHardwareSupportMask);
     }
 
+    [Guid("1CB9AD4C-DBFA-4c32-B178-C2F568A703B2")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IAudioClient
+    {
+        [PreserveSig] int Initialize(int shareMode, int streamFlags, long hnsBufferDuration, long hnsPeriodicity, IntPtr pFormat, IntPtr AudioSessionGuid);
+        [PreserveSig] int GetBufferSize(out int numBufferFrames);
+        [PreserveSig] int GetStreamLatency(out long hnsLatency);
+        [PreserveSig] int GetCurrentPadding(out int numPaddingFrames);
+        [PreserveSig] int IsFormatSupported(int shareMode, IntPtr pFormat, out IntPtr ppClosestMatch);
+        [PreserveSig] int GetMixFormat(out IntPtr ppDeviceFormat);
+        [PreserveSig] int GetDevicePeriod(out long hnsDefaultDevicePeriod, out long hnsMinimumDevicePeriod);
+        [PreserveSig] int Start();
+        [PreserveSig] int Stop();
+        [PreserveSig] int Reset();
+        [PreserveSig] int SetEventHandle(IntPtr eventHandle);
+        [PreserveSig] int GetService(ref Guid interfaceId, [MarshalAs(UnmanagedType.IUnknown)] out object interfacePointer);
+    }
+
     private const int CLSCTX_ALL = 23; // CLSCTX_INPROC_SERVER | HANDLER | LOCAL | REMOTE
 
     // ── Instance State ───────────────────────────────────────────────────────
 
     private object? _enumeratorRef;   // prevent GC of the enumerator RCW
     private object? _deviceRef;       // prevent GC of the device RCW
+    private object? _audioClientRef;  // dummy capture stream to wake up the mic
     private IAudioMeterInformation? _meter;
     private Timer? _pollTimer;
     private volatile float _currentPeakLevel;
@@ -98,7 +117,27 @@ public sealed class AudioMonitorService : IDisposable
             Marshal.ThrowExceptionForHR(hr);
             _meter = (IAudioMeterInformation)meterObj;
 
-            // 4. Start polling at ~30 Hz.
+            // 4. Wake up the microphone by starting a dummy shared capture stream.
+            // Without this, WASAPI IAudioMeterInformation returns exactly 0.0 if no other app is recording.
+            Guid audioClientIid = typeof(IAudioClient).GUID;
+            hr = device.Activate(ref audioClientIid, CLSCTX_ALL, IntPtr.Zero, out object audioClientObj);
+            if (hr == 0 && audioClientObj is IAudioClient audioClient)
+            {
+                _audioClientRef = audioClient;
+                hr = audioClient.GetMixFormat(out IntPtr waveFormatEx);
+                if (hr == 0)
+                {
+                    // AUDCLNT_SHAREMODE_SHARED = 0
+                    hr = audioClient.Initialize(0, 0, 10000000, 0, waveFormatEx, IntPtr.Zero);
+                    if (hr == 0)
+                    {
+                        audioClient.Start();
+                    }
+                    Marshal.FreeCoTaskMem(waveFormatEx);
+                }
+            }
+
+            // 5. Start polling at ~30 Hz.
             _pollTimer = new Timer(_ => PollPeakValue(), null, 0, 33);
 
             Log.Information("COM Peak Meter started for {Device} (EndpointId: {Id})", friendlyName, endpointId);
@@ -141,6 +180,12 @@ public sealed class AudioMonitorService : IDisposable
 
         try
         {
+            if (_audioClientRef is IAudioClient client)
+            {
+                client.Stop();
+                Marshal.ReleaseComObject(_audioClientRef);
+                _audioClientRef = null;
+            }
             if (_meter != null) { Marshal.ReleaseComObject(_meter); _meter = null; }
             if (_deviceRef != null) { Marshal.ReleaseComObject(_deviceRef); _deviceRef = null; }
             if (_enumeratorRef != null) { Marshal.ReleaseComObject(_enumeratorRef); _enumeratorRef = null; }
